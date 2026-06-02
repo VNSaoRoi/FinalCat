@@ -2,8 +2,6 @@
 
 Lightweight pivot control plane: agents check in over WebSocket; you manage them from a local web UI and open SOCKS or TCP forwards on hosts you control.
 
-Full design notes: [docs/design-v0.md](docs/design-v0.md)
-
 ## Legal / authorized use
 
 FinalCat is intended for **authorized security testing, research, and lab environments** only. You must have explicit permission before deploying agents or opening routes on any system you do not own or control. The authors and contributors are not responsible for misuse. See [LICENSE](LICENSE) (MIT).
