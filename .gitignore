@@ -1,0 +1,32 @@
+# Build outputs
+/bin/
+/dist/
+/dist-*/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go test / coverage
+*.test
+coverage.out
+coverage.html
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (never commit)
+.env
+.env.*
+!.env.example
+
+# Go workspace (local only)
+go.work
+go.work.sum

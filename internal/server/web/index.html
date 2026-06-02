@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="google" content="notranslate" />
+  <meta http-equiv="Content-Language" content="en" />
+  <title>FinalCat</title>
+  <style>
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+      --online: #3fb950; --offline: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    header { display: flex; align-items: center; gap: 1rem; padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--border); background: var(--surface); flex-wrap: wrap; }
+    header h1 { margin: 0; font-size: 1.1rem; }
+    nav { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    nav a { color: var(--muted); text-decoration: none; padding: 0.35rem 0.65rem; border-radius: 6px; font-size: 0.88rem; }
+    nav a.active, nav a:hover { color: var(--text); background: #21262d; }
+    #wsPill { margin-left: auto; font-size: 0.75rem; color: var(--muted); }
+    #wsPill.live { color: var(--online); }
+    main { padding: 1.25rem; max-width: 1100px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    .stat-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1.25rem; min-width: 100px; }
+    .stat .n { font-size: 1.5rem; font-weight: 600; }
+    .stat .l { font-size: 0.75rem; color: var(--muted); }
+    .badge { font-size: 0.7rem; padding: 0.15rem 0.45rem; border-radius: 999px; font-weight: 600; }
+    .badge.on { background: rgba(63,185,80,.15); color: var(--online); }
+    .badge.off { background: rgba(248,81,73,.15); color: var(--offline); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    .card-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem; }
+    .hostname { margin: 0; font-size: 1rem; }
+    dl { margin: 0; font-size: 0.78rem; display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 0.75rem; }
+    dt { color: var(--muted); }
+    .field { display: block; margin-bottom: 0.65rem; font-size: 0.85rem; }
+    .field input, .field select, .field textarea { width: 100%; margin-top: 0.25rem; padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid var(--border); background: #0d1117; color: var(--text); }
+    .row2 { display: grid; grid-template-columns: 1fr 100px; gap: 0.5rem; }
+    .btn { background: var(--accent); color: #0d1117; border: none; padding: 0.45rem 0.85rem; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    .btn.secondary { background: #21262d; color: var(--text); }
+    .form-msg { font-size: 0.82rem; margin-top: 0.5rem; }
+    .form-msg.err { color: var(--offline); }
+    .form-msg.ok { color: var(--online); }
+    .muted { color: var(--muted); font-size: 0.85rem; }
+    #loginGate { max-width: 22rem; margin: 4rem auto; }
+    #topoGraph { min-height: 360px; border: 1px dashed var(--border); border-radius: 8px; position: relative; }
+    .topo-node { position: absolute; padding: 0.5rem 0.75rem; background: #21262d; border: 1px solid var(--border); border-radius: 8px; font-size: 0.75rem; transform: translate(-50%, -50%); }
+    .topo-node.op { border-color: var(--accent); }
+    .topo-node.on { border-color: var(--online); }
+    pre.copy { background: #0d1117; padding: 0.75rem; border-radius: 6px; overflow: auto; font-size: 0.72rem; white-space: pre-wrap; word-break: break-all; }
+    table.data { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    table.data th, table.data td { text-align: left; padding: 0.45rem; border-bottom: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+  <div id="loginGate" hidden>
+    <div class="card" id="loginGateCard">
+      <h2>FinalCat</h2>
+      <form id="loginForm">
+        <label class="field">Password<input type="password" id="loginPwd" autocomplete="current-password" /></label>
+        <button type="submit" class="btn">Sign in</button>
+        <p id="loginMsg" class="form-msg"></p>
+      </form>
+    </div>
+  </div>
+  <div id="appShell" hidden>
+    <header>
+      <h1>FinalCat</h1>
+      <nav>
+        <a href="#/dashboard" data-route="dashboard">Dashboard</a>
+        <a href="#/agents" data-route="agents">Agents</a>
+        <a href="#/topology" data-route="topology">Topology</a>
+        <a href="#/route" data-route="route">Route</a>
+      </nav>
+      <span id="wsPill">WS idle</span>
+    </header>
+    <main id="view"></main>
+  </div>
+  <script>
+    const state = { clients: [], routes: [] };
+    const GRAPH_OP = '__fc_operator__';
+
+    function routeName() {
+      const h = location.hash.replace(/^#\/?/, '');
+      const p = (h.split('/')[0] || 'dashboard').toLowerCase();
+      return ['dashboard','agents','topology','route'].includes(p) ? p : 'dashboard';
+    }
+
+    function esc(s) {
+      return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+    }
+
+    function fmtTime(t) {
+      if (!t) return '—';
+      try {
+        return new Date(t).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'medium', hour12: false });
+      } catch { return t; }
+    }
+
+    function agentTitle(c) {
+      const u = (c.OSUser || '?').trim();
+      const h = (c.Hostname || 'host').trim();
+      return u + '@' + h;
+    }
+
+    async function apiFetch(path, opts) {
+      return fetch(path, Object.assign({ credentials: 'same-origin' }, opts || {}));
+    }
+
+    function setWsPill(cls, text) {
+      const el = document.getElementById('wsPill');
+      if (!el) return;
+      el.className = cls || '';
+      el.textContent = text;
+    }
+
+    function paintNav() {
+      const r = routeName();
+      document.querySelectorAll('nav a[data-route]').forEach(a => {
+        a.classList.toggle('active', a.getAttribute('data-route') === r);
+      });
+    }
+
+    function renderDashboard() {
+      const list = state.clients || [];
+      const online = list.filter(c => c.Online).length;
+      const rows = list.length ? list.map(c =>
+        '<tr><td>' + esc(agentTitle(c)) + '</td><td>' + esc(c.OS||'—') + '</td><td>' +
+        (c.Online ? '<span class="badge on">Online</span>' : '<span class="badge off">Offline</span>') +
+        '</td><td>' + esc(c.ActiveUpstreamUsed||'—') + '</td><td>' + fmtTime(c.LastSeen) + '</td></tr>'
+      ).join('') : '<tr><td colspan="5" class="muted">No agents yet.</td></tr>';
+      document.getElementById('view').innerHTML =
+        '<h2>Dashboard</h2>' +
+        '<div class="stat-row">' +
+        '<div class="stat"><div class="n">' + list.length + '</div><div class="l">Total</div></div>' +
+        '<div class="stat"><div class="n">' + online + '</div><div class="l">Online</div></div>' +
+        '<div class="stat"><div class="n">' + (list.length - online) + '</div><div class="l">Offline</div></div>' +
+        '</div>' +
+        '<div class="card"><table class="data"><thead><tr><th>Agent</th><th>OS</th><th>State</th><th>Upstream</th><th>Last seen</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    }
+
+    function listenerChips(listeners) {
+      if (!Array.isArray(listeners) || !listeners.length) return '—';
+      return listeners.map(l => esc(l.address || '') + (l.state ? ' (' + esc(l.state) + ')' : '')).join(', ');
+    }
+
+    function localIPsDisplay(ips) {
+      if (!Array.isArray(ips) || !ips.length) return '—';
+      return ips.map(ip => '<code>' + esc(ip) + '</code>').join(' ');
+    }
+
+    function renderAgents() {
+      const list = state.clients || [];
+      const bindCard =
+        '<div class="card" style="max-width:520px;margin-bottom:1rem">' +
+        '<h3 style="margin:0 0 0.5rem;font-size:0.95rem">Attach bind agent</h3>' +
+        '<p class="muted">Server dials a client listening with <code>-l</code> (bind-only / hybrid).</p>' +
+        '<form id="bindAttachForm">' +
+        '<div class="row2"><label class="field">Bind host<input name="bind_host" required placeholder="172.16.7.50" /></label>' +
+        '<label class="field">Port<input name="bind_port" type="number" value="18229" required /></label></div>' +
+        '<button type="submit" class="btn">Attach</button><p id="bindAttachMsg" class="form-msg"></p></form></div>';
+      if (!list.length) {
+        document.getElementById('view').innerHTML = '<h2>Agents</h2>' + bindCard + '<p class="muted">No agents in registry yet.</p>';
+        attachBindForm();
+        return;
+      }
+      document.getElementById('view').innerHTML = '<h2>Agents</h2>' + bindCard + '<div class="grid">' + list.map(c => {
+        const id = esc(c.ID);
+        const ups = (c.UpstreamEndpoints || []).join('\n');
+        const badge = c.Online ? 'on">Online' : 'off">Offline';
+        return '<article class="card"><div class="card-head"><h3 class="hostname">' + esc(agentTitle(c)) +
+          '</h3><span class="badge ' + badge + '</span></div>' +
+          '<dl><dt>Mode</dt><dd>' + esc(c.AgentMode||'reverse') + '</dd>' +
+          '<dt>OS</dt><dd>' + esc(c.OS||'—') + '</dd><dt>Client ID</dt><dd style="word-break:break-all">' + id + '</dd>' +
+          '<dt>Remote</dt><dd>' + esc(c.RemoteAddr||'—') + '</dd>' +
+          '<dt>Local IPs</dt><dd style="line-height:1.6">' + localIPsDisplay(c.LocalIPs) + '</dd>' +
+          '<dt>Active upstream</dt><dd>' + esc(c.ActiveUpstreamUsed||'—') + '</dd>' +
+          '<dt>Listeners</dt><dd>' + listenerChips(c.Listeners) + '</dd>' +
+          '<dt>Last seen</dt><dd>' + fmtTime(c.LastSeen) + '</dd></dl>' +
+          (c.Online
+            ? '<details style="margin-top:0.75rem"><summary>Edit upstreams (failover)</summary>' +
+              '<form class="upstream-form" data-id="' + id + '"><textarea rows="3" style="width:100%;margin:0.5rem 0">' + esc(ups) + '</textarea>' +
+              '<button type="submit" class="btn secondary">Apply</button><p class="form-msg up-msg"></p></form></details>'
+            : '') +
+          '</article>';
+      }).join('') + '</div>';
+      attachBindForm();
+      document.querySelectorAll('.upstream-form').forEach(f => {
+        f.addEventListener('submit', async ev => {
+          ev.preventDefault();
+          const id = f.getAttribute('data-id');
+          const msg = f.querySelector('.up-msg');
+          const text = f.querySelector('textarea').value;
+          const endpoints = text.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+          msg.className = 'form-msg';
+          try {
+            const res = await apiFetch('/api/clients/' + encodeURIComponent(id) + '/upstreams', {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ endpoints })
+            });
+            const t = await res.text();
+            if (!res.ok) throw new Error(t || res.statusText);
+            msg.classList.add('ok'); msg.textContent = 'Applied.';
+          } catch (e) {
+            msg.classList.add('err'); msg.textContent = e.message;
+          }
+        });
+      });
+    }
+
+    function attachBindForm() {
+      const form = document.getElementById('bindAttachForm');
+      if (!form) return;
+      form.addEventListener('submit', async ev => {
+        ev.preventDefault();
+        const fd = new FormData(form);
+        const msg = document.getElementById('bindAttachMsg');
+        msg.className = 'form-msg';
+        try {
+          const res = await apiFetch('/api/jobs/bind-attach', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              bind_host: fd.get('bind_host'),
+              bind_port: parseInt(fd.get('bind_port') || '0', 10),
+            }),
+          });
+          const j = await res.json();
+          if (!res.ok) throw new Error(j.message || JSON.stringify(j));
+          msg.classList.add('ok');
+          msg.textContent = 'Attached client_id=' + (j.client_id || '');
+        } catch (e) {
+          msg.classList.add('err');
+          msg.textContent = e.message;
+        }
+      });
+    }
+
+    function renderTopology() {
+      const list = (state.clients || []).filter(c => c.Online);
+      const host = document.getElementById('view');
+      host.innerHTML = '<h2>Topology</h2><p class="muted">Operator → agents (active upstream). View-only.</p><div id="topoGraph"></div>';
+      const g = document.getElementById('topoGraph');
+      const w = g.clientWidth || 800;
+      const cx = w / 2, cy = 40;
+      g.innerHTML = '<div class="topo-node op" style="left:' + cx + 'px;top:' + cy + 'px">Operator</div>';
+      const n = list.length || 1;
+      list.forEach((c, i) => {
+        const ang = (Math.PI * (i + 1)) / (n + 1);
+        const x = cx + Math.cos(ang) * 220;
+        const y = cy + 120 + Math.sin(ang) * 80;
+        const el = document.createElement('div');
+        el.className = 'topo-node on';
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        el.textContent = agentTitle(c);
+        el.title = c.ActiveUpstreamUsed || '';
+        g.appendChild(el);
+      });
+    }
+
+    function renderRoute() {
+      const agents = (state.clients || []).filter(c => c.Online);
+      const agentOpts = agents.length
+        ? agents.map(c => '<option value="' + esc(c.ID) + '">' + esc(agentTitle(c)) + '</option>').join('')
+        : '<option value="">(no online agents)</option>';
+      const routes = state.routes || [];
+      const rows = routes.length ? routes.map(r => {
+        const st = r.state || 'pending';
+        const badgeCls = st === 'active' ? 'on' : (st === 'error' ? 'off' : '');
+        return '<tr><td><code>' + esc(r.id) + '</code></td><td>' + esc(r.agent_hostname || r.agent_id || '—') +
+          '</td><td>' + esc(r.kind) + (r.bind_on ? ' (' + esc(r.bind_on) + ')' : '') +
+          '</td><td>' + esc(r.listen_addr || '—') + '</td><td>' + esc(r.target || '—') +
+          '</td><td><span class="badge ' + badgeCls + '">' + esc(st) + '</span></td>' +
+          '<td>' + (st !== 'closed' ? '<button type="button" class="btn secondary route-close" data-id="' + esc(r.id) + '">Close</button>' : '—') +
+          '</td></tr>';
+      }).join('') : '<tr><td colspan="7" class="muted">No active routes.</td></tr>';
+
+      document.getElementById('view').innerHTML =
+        '<h2>Route</h2>' +
+        '<p class="muted">SOCKS5: bind on <strong>agent</strong> (direct) or <strong>server</strong> (egress via agent). TCP forward is always on the agent.</p>' +
+        '<div class="grid" style="grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">' +
+        '<div class="card"><h3 style="margin:0 0 0.5rem;font-size:0.95rem">SOCKS5</h3>' +
+        '<form id="socksForm"><label class="field">Agent (egress)<select name="agent_id" required>' + agentOpts + '</select></label>' +
+        '<label class="field">Bind on<select name="bind_on" id="socksBindOn"><option value="agent">agent (listen on agent)</option>' +
+        '<option value="server">server (listen on server → agent)</option></select></label>' +
+        '<label class="field">Bind addr<input name="bind_addr" id="socksBindAddr" value="0.0.0.0:1080" placeholder="0.0.0.0:1080" /></label>' +
+        '<button type="submit" class="btn">Open SOCKS</button><p id="socksMsg" class="form-msg"></p></form></div>' +
+        '<div class="card"><h3 style="margin:0 0 0.5rem;font-size:0.95rem">TCP forward</h3>' +
+        '<form id="forwardForm"><label class="field">Agent<select name="agent_id" required>' + agentOpts + '</select></label>' +
+        '<label class="field">Listen addr<input name="listen_addr" value="0.0.0.0:4444" /></label>' +
+        '<div class="row2"><label class="field">Target host<input name="target_host" placeholder="10.0.0.5" required /></label>' +
+        '<label class="field">Port<input name="target_port" type="number" value="3389" required /></label></div>' +
+        '<button type="submit" class="btn">Open forward</button><p id="forwardMsg" class="form-msg"></p></form></div></div>' +
+        '<div class="card"><h3 style="margin:0 0 0.5rem;font-size:0.95rem">Active routes</h3>' +
+        '<table class="data"><thead><tr><th>ID</th><th>Agent</th><th>Kind</th><th>Listen</th><th>Target</th><th>State</th><th></th></tr></thead><tbody>' +
+        rows + '</tbody></table></div>';
+
+      const bindOnSel = document.getElementById('socksBindOn');
+      const bindAddrIn = document.getElementById('socksBindAddr');
+      function syncSocksBind() {
+        if (bindOnSel.value === 'server') {
+          bindAddrIn.value = '127.0.0.1:1080';
+          bindAddrIn.placeholder = '127.0.0.1:1080';
+        } else {
+          bindAddrIn.value = '0.0.0.0:1080';
+          bindAddrIn.placeholder = '0.0.0.0:1080';
+        }
+      }
+      bindOnSel.addEventListener('change', syncSocksBind);
+      syncSocksBind();
+
+      document.getElementById('socksForm').addEventListener('submit', async ev => {
+        ev.preventDefault();
+        const fd = new FormData(ev.target);
+        const msg = document.getElementById('socksMsg');
+        msg.className = 'form-msg';
+        try {
+          const res = await apiFetch('/api/routes/socks', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agent_id: fd.get('agent_id'),
+              bind_addr: fd.get('bind_addr'),
+              bind_on: fd.get('bind_on'),
+            }),
+          });
+          const t = await res.text();
+          let j; try { j = JSON.parse(t); } catch { j = { message: t }; }
+          if (!res.ok) throw new Error(j.message || t);
+          msg.classList.add('ok'); msg.textContent = 'Route ' + (j.id || '') + ' pending…';
+        } catch (e) { msg.classList.add('err'); msg.textContent = e.message; }
+      });
+
+      document.getElementById('forwardForm').addEventListener('submit', async ev => {
+        ev.preventDefault();
+        const fd = new FormData(ev.target);
+        const msg = document.getElementById('forwardMsg');
+        msg.className = 'form-msg';
+        try {
+          const res = await apiFetch('/api/routes/forward', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agent_id: fd.get('agent_id'),
+              listen_addr: fd.get('listen_addr'),
+              target_host: fd.get('target_host'),
+              target_port: parseInt(fd.get('target_port') || '0', 10),
+            }),
+          });
+          const t = await res.text();
+          let j; try { j = JSON.parse(t); } catch { j = { message: t }; }
+          if (!res.ok) throw new Error(j.message || t);
+          msg.classList.add('ok'); msg.textContent = 'Route ' + (j.id || '') + ' pending…';
+        } catch (e) { msg.classList.add('err'); msg.textContent = e.message; }
+      });
+
+      document.querySelectorAll('.route-close').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-id');
+          try {
+            const res = await apiFetch('/api/routes/' + encodeURIComponent(id), { method: 'DELETE' });
+            if (!res.ok) throw new Error(await res.text());
+          } catch (e) { alert(e.message); }
+        });
+      });
+    }
+
+    function paint() {
+      paintNav();
+      const r = routeName();
+      if (r === 'dashboard') renderDashboard();
+      else if (r === 'agents') renderAgents();
+      else if (r === 'topology') renderTopology();
+      else if (r === 'route') renderRoute();
+    }
+
+    let ws;
+    function connectWS() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(proto + '//' + location.host + '/ws/ui');
+      ws.onopen = () => setWsPill('live', 'UI live');
+      ws.onmessage = ev => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (Array.isArray(data)) {
+            state.clients = data;
+          } else {
+            state.clients = data.clients || [];
+            state.routes = data.routes || [];
+          }
+          paint();
+        } catch (_) {}
+      };
+      ws.onclose = () => { setWsPill('', 'WS retry…'); setTimeout(connectWS, 2500); };
+    }
+
+    async function startApp() {
+      document.getElementById('loginGate').hidden = true;
+      document.getElementById('appShell').hidden = false;
+      paint();
+      window.addEventListener('hashchange', paint);
+      connectWS();
+    }
+
+    async function bootstrap() {
+      const st = await apiFetch('/api/auth/status');
+      const j = await st.json();
+      if (j.auth_enabled && !j.authenticated) {
+        document.getElementById('loginGate').hidden = false;
+        return;
+      }
+      await startApp();
+    }
+
+    document.getElementById('loginForm')?.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const res = await apiFetch('/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: document.getElementById('loginPwd').value })
+      });
+      if (res.ok) await startApp();
+      else document.getElementById('loginMsg').textContent = 'Invalid password';
+    });
+
+    bootstrap();
+  </script>
+</body>
+</html>
