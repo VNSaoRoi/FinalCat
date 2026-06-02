@@ -16,9 +16,11 @@ build_one() {
   fi
 }
 
-# Server: Linux amd64, Windows amd64
+# Server: Linux + Windows, amd64 + 386
 build_one linux   amd64 "$OUT/server_linux_amd64" ./cmd/server
+build_one linux   386   "$OUT/server_linux_386" ./cmd/server
 build_one windows amd64 "$OUT/server_windows_amd64.exe" ./cmd/server
+build_one windows 386   "$OUT/server_windows_386.exe" ./cmd/server
 
 # Client (agent): Linux + Windows, amd64 + 386
 build_one linux   amd64 "$OUT/client/agent_linux_amd64" ./cmd/agent

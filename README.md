@@ -24,8 +24,8 @@ Outputs:
 
 | Binary | Path |
 |--------|------|
-| Server (Linux) | `dist/server_linux_amd64` |
-| Server (Windows) | `dist/server_windows_amd64.exe` |
+| Server (Linux amd64 / 386) | `dist/server_linux_*` |
+| Server (Windows amd64 / 386) | `dist/server_windows_*.exe` |
 | Agent (Linux amd64 / 386) | `dist/client/agent_linux_*` |
 | Agent (Windows amd64 / 386) | `dist/client/agent_windows_*.exe` |
 

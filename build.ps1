@@ -19,9 +19,11 @@ function Build-One($GoOS, $GoArch, $OutPath, $Pkg) {
     Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
 }
 
-# Server: Linux amd64, Windows amd64
+# Server: Linux + Windows, amd64 + 386
 Build-One linux   amd64 (Join-Path $Out "server_linux_amd64")           "./cmd/server"
+Build-One linux   386   (Join-Path $Out "server_linux_386")             "./cmd/server"
 Build-One windows amd64 (Join-Path $Out "server_windows_amd64.exe")     "./cmd/server"
+Build-One windows 386   (Join-Path $Out "server_windows_386.exe")       "./cmd/server"
 
 # Client: Linux + Windows, amd64 + 386
 Build-One linux   amd64 (Join-Path $ClientOut "agent_linux_amd64")           "./cmd/agent"
