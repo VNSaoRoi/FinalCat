@@ -21,7 +21,7 @@
     nav a.active, nav a:hover { color: var(--text); background: #21262d; }
     #wsPill { margin-left: auto; font-size: 0.75rem; color: var(--muted); }
     #wsPill.live { color: var(--online); }
-    main { padding: 1.25rem; max-width: 1100px; }
+    main { padding: 1.25rem; max-width: 1200px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
     .stat-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
     .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1.25rem; min-width: 100px; }
@@ -38,6 +38,7 @@
     .field { display: block; margin-bottom: 0.65rem; font-size: 0.85rem; }
     .field input, .field select, .field textarea { width: 100%; margin-top: 0.25rem; padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid var(--border); background: #0d1117; color: var(--text); }
     .row2 { display: grid; grid-template-columns: 1fr 100px; gap: 0.5rem; }
+    .row-ip { display: grid; grid-template-columns: 1fr 1.2fr; gap: 0.5rem; align-items: end; }
     .btn { background: var(--accent); color: #0d1117; border: none; padding: 0.45rem 0.85rem; border-radius: 6px; cursor: pointer; font-weight: 600; }
     .btn.secondary { background: #21262d; color: var(--text); }
     .form-msg { font-size: 0.82rem; margin-top: 0.5rem; }
@@ -51,7 +52,23 @@
     .topo-node.on { border-color: var(--online); }
     pre.copy { background: #0d1117; padding: 0.75rem; border-radius: 6px; overflow: auto; font-size: 0.72rem; white-space: pre-wrap; word-break: break-all; }
     table.data { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-    table.data th, table.data td { text-align: left; padding: 0.45rem; border-bottom: 1px solid var(--border); }
+    table.data th, table.data td { text-align: left; padding: 0.45rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .line-text { font-family: ui-monospace, monospace; font-size: 0.82rem; line-height: 1.6; word-break: break-all; }
+    .line-text .arr-out { color: var(--accent); }
+    .line-text .arr-in { color: #79c0ff; }
+    .line-text .kind { color: var(--muted); }
+    .badge.live { background: rgba(63,185,80,.15); color: var(--online); }
+    .badge.wait { background: rgba(210,153,34,.15); color: #d29922; }
+    .route-section { margin-top: 1.25rem; }
+    .route-section h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+    .route-toolbar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+    .modal-backdrop[hidden] { display: none !important; }
+    .modal-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; width: 100%; max-width: 440px; max-height: 90vh; overflow: auto; padding: 1rem 1.15rem; box-shadow: 0 8px 32px rgba(0,0,0,.45); }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; gap: 0.5rem; }
+    .modal-head h3 { margin: 0; font-size: 1rem; }
+    .modal-close { background: none; border: none; color: var(--muted); font-size: 1.4rem; cursor: pointer; padding: 0 0.2rem; line-height: 1; }
+    .modal-close:hover { color: var(--text); }
   </style>
 </head>
 <body>
@@ -78,8 +95,17 @@
     </header>
     <main id="view"></main>
   </div>
+  <div id="routeModalBackdrop" class="modal-backdrop" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h3 id="routeModalTitle">Create route</h3>
+        <button type="button" class="modal-close" id="routeModalClose" aria-label="Close">&times;</button>
+      </div>
+      <div id="routeModalBody"></div>
+    </div>
+  </div>
   <script>
-    const state = { clients: [], routes: [] };
+    const state = { clients: [], routes: [], routeForm: null, routeMounted: false, routeModalOpen: null, currentView: '' };
     const GRAPH_OP = '__fc_operator__';
 
     function routeName() {
@@ -97,6 +123,750 @@
       try {
         return new Date(t).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'medium', hour12: false });
       } catch { return t; }
+    }
+
+    function routeFormState() {
+      if (!state.routeForm) {
+        state.routeForm = {
+          socks: { agent_id: '', bind_on: 'agent', bind_addr: '0.0.0.0:1080', ip_pick: '' },
+          forward: { agent_id: '', listen_addr: '0.0.0.0:4444', target_host: '', target_port: '3389', ip_pick: '' },
+        };
+      }
+      return state.routeForm;
+    }
+
+    function saveRouteFormFromDOM(kind) {
+      const rf = routeFormState();
+      const formId = kind === 'socks' ? 'socksForm' : 'forwardForm';
+      const form = document.getElementById(formId);
+      if (!form) return;
+      const fd = new FormData(form);
+      const bucket = rf[kind];
+      if (kind === 'socks') {
+        bucket.agent_id = String(fd.get('agent_id') || bucket.agent_id);
+        bucket.bind_on = String(fd.get('bind_on') || bucket.bind_on);
+        bucket.bind_addr = String(fd.get('bind_addr') ?? bucket.bind_addr);
+        bucket.ip_pick = String(fd.get('ip_pick') || '');
+      } else {
+        bucket.agent_id = String(fd.get('agent_id') || bucket.agent_id);
+        bucket.listen_addr = String(fd.get('listen_addr') ?? bucket.listen_addr);
+        bucket.target_host = String(fd.get('target_host') ?? bucket.target_host);
+        bucket.target_port = String(fd.get('target_port') ?? bucket.target_port);
+        bucket.ip_pick = String(fd.get('ip_pick') || '');
+      }
+    }
+
+    function rememberRouteForm() {
+      if (state.routeModalOpen === 'socks') saveRouteFormFromDOM('socks');
+      if (state.routeModalOpen === 'forward') saveRouteFormFromDOM('forward');
+    }
+
+    function agentById(id) {
+      return (state.clients || []).find(c => c.ID === id);
+    }
+
+    function collectAgentIPs(c) {
+      const out = [];
+      const seen = new Set();
+      const add = ip => {
+        if (!ip || seen.has(ip)) return;
+        seen.add(ip);
+        out.push(ip);
+      };
+      (c.LocalIPs || []).forEach(add);
+      const remote = String(c.RemoteAddr || '').trim();
+      if (remote) {
+        const host = remote.includes(':') ? remote.split(':')[0] : remote;
+        add(host);
+      }
+      return out;
+    }
+
+    function portFromAddr(addr, fallback) {
+      const s = String(addr || '').trim();
+      const i = s.lastIndexOf(':');
+      if (i > 0) {
+        const p = parseInt(s.slice(i + 1), 10);
+        if (p > 0 && p <= 65535) return p;
+      }
+      return fallback;
+    }
+
+    function setAddrHost(addr, host, fallbackPort) {
+      const port = portFromAddr(addr, fallbackPort);
+      return host + ':' + port;
+    }
+
+    // —— Live lines (route map) ——
+
+    function hostFromEndpoint(ep) {
+      const s = String(ep || '').trim();
+      if (!s) return '';
+      if (s.startsWith('[')) {
+        const j = s.indexOf(']');
+        return j > 0 ? s.slice(1, j) : s;
+      }
+      const i = s.lastIndexOf(':');
+      return i > 0 ? s.slice(0, i) : s;
+    }
+
+    function operatorHosts() {
+      const set = new Set();
+      const lh = location.hostname;
+      if (lh && lh !== 'localhost' && lh !== '127.0.0.1') set.add(lh);
+      (state.clients || []).forEach(c => {
+        addHost(set, hostFromEndpoint(c.ActiveUpstreamUsed));
+        (c.UpstreamEndpoints || []).forEach(ep => addHost(set, hostFromEndpoint(ep)));
+      });
+      function addHost(s, h) {
+        if (h && h !== '0.0.0.0') s.add(h);
+      }
+      return set;
+    }
+
+    function parseHP(addr, defaultPort) {
+      const s = String(addr || '').trim();
+      const i = s.lastIndexOf(':');
+      if (i > 0) {
+        const host = s.slice(0, i);
+        const port = parseInt(s.slice(i + 1), 10);
+        if (port > 0 && port <= 65535) return { host, port };
+      }
+      return { host: s, port: defaultPort };
+    }
+
+    function parseRouteTarget(r) {
+      const t = String(r.target || '').trim();
+      if (!t) return { host: '', port: 0 };
+      const i = t.lastIndexOf(':');
+      if (i > 0) {
+        const port = parseInt(t.slice(i + 1), 10);
+        if (port > 0 && port <= 65535) return { host: t.slice(0, i), port };
+      }
+      return { host: t, port: 0 };
+    }
+
+    function lineClients() {
+      return (state.clients || []).map(c => ({
+        id: c.ID,
+        hostname: c.Hostname,
+        osUser: c.OSUser,
+        ips: collectAgentIPs(c),
+      }));
+    }
+
+    function lineRoutes() {
+      return (state.routes || []).map(r => {
+        const tgt = parseRouteTarget(r);
+        const kind = r.kind === 'socks_server' ? 'socks' : r.kind;
+        const bindOn = r.bind_on || (r.kind === 'socks_server' ? 'server' : 'agent');
+        return {
+          id: r.id,
+          agent_id: r.agent_id,
+          kind,
+          listen_addr: r.listen_addr,
+          bind_on: bindOn,
+          target_host: tgt.host,
+          target_port: tgt.port,
+          state: r.state,
+          message: r.message,
+        };
+      });
+    }
+
+    function isServerTarget(host) {
+      if (!host) return false;
+      return operatorHosts().has(host);
+    }
+
+    function lineAgentById(clients, id) {
+      return clients.find(c => c.id === id);
+    }
+
+    function lineAgentTitle(c) {
+      return (c.osUser || '?') + '@' + (c.hostname || 'host');
+    }
+
+    function resolveListen(route, agent) {
+      const ips = agent.ips || [];
+      const l = parseHP(route.listen_addr || route.bind_addr, 0);
+      if (l.host === '0.0.0.0' || l.host === '::' || l.host === '*') {
+        const ip = ips[0] || '0.0.0.0';
+        return { display: ip + ':' + l.port, host: ip, port: l.port, wildcard: true, ips };
+      }
+      return { display: l.host + ':' + l.port, host: l.host, port: l.port, wildcard: false, ips };
+    }
+
+    function isSocksKind(kind) {
+      return kind === 'socks' || kind === 'socks_server';
+    }
+
+    function buildListenIndex(clients, routes, kind) {
+      const index = new Map();
+      const add = (key, entry) => {
+        if (!index.has(key)) index.set(key, []);
+        index.get(key).push(entry);
+      };
+      const filterKind = kind === 'socks'
+        ? r => isSocksKind(r.kind)
+        : r => r.kind === kind;
+      for (const r of routes.filter(x => filterKind(x) && x.state === 'active')) {
+        const agent = lineAgentById(clients, r.agent_id);
+        if (!agent) continue;
+        const listen = resolveListen(r, agent);
+        const entry = { route: r, agent, listen, kind: r.kind };
+        add(listen.host + ':' + listen.port, entry);
+        if (listen.wildcard) {
+          add('*:' + listen.port, entry);
+          (listen.ips || agent.ips || []).forEach(ip => {
+            add(ip + ':' + listen.port, { ...entry, listen: { ...listen, host: ip, display: ip + ':' + listen.port } });
+          });
+        }
+      }
+      return index;
+    }
+
+    function matchListen(index, host, port) {
+      const exact = index.get(host + ':' + port);
+      if (exact && exact.length) return exact[0];
+      const wild = index.get('*:' + port);
+      if (wild && wild.length) {
+        const m = wild.find(w => (w.agent.ips || []).includes(host));
+        if (m) return { ...m, listen: { ...m.listen, host, display: host + ':' + port } };
+      }
+      return null;
+    }
+
+    function isLineAgentIP(clients, host) {
+      return clients.some(c => (c.ips || []).includes(host));
+    }
+
+    function buildForwardLine(clients, routes, route, forwardIndex, socksIndex, usedAsHop, usedSocks) {
+      const agent = lineAgentById(clients, route.agent_id);
+      if (!agent) return null;
+      const entryListen = resolveListen(route, agent);
+      const listensInsideOut = [];
+      let cur = route;
+      const visited = new Set([route.id]);
+      let broken = false;
+      let brokenAt = '';
+      let finalHost = route.target_host;
+      let finalPort = route.target_port;
+      let endsAtSocks = null;
+
+      while (true) {
+        finalHost = cur.target_host;
+        finalPort = cur.target_port;
+        const th = cur.target_host;
+        const tp = cur.target_port;
+        const nextFwd = matchListen(forwardIndex, th, tp);
+        if (nextFwd && !visited.has(nextFwd.route.id)) {
+          usedAsHop.add(nextFwd.route.id);
+          listensInsideOut.push(resolveListen(nextFwd.route, nextFwd.agent).display);
+          visited.add(nextFwd.route.id);
+          cur = nextFwd.route;
+          continue;
+        }
+        const nextSocks = matchListen(socksIndex, th, tp);
+        if (nextSocks && !visited.has(nextSocks.route.id)) {
+          usedSocks.add(nextSocks.route.id);
+          endsAtSocks = {
+            display: resolveListen(nextSocks.route, nextSocks.agent).display,
+            bindOn: nextSocks.route.bind_on || 'agent',
+            routeId: nextSocks.route.id,
+          };
+          break;
+        }
+        if (isLineAgentIP(clients, th)) {
+          const expectFwd = routes.some(r => r.kind === 'forward' && r.state === 'active' && r.id !== cur.id &&
+            resolveListen(r, lineAgentById(clients, r.agent_id)).port === tp &&
+            (lineAgentById(clients, r.agent_id)?.ips || []).includes(th));
+          const expectSocks = routes.some(r => isSocksKind(r.kind) && r.state === 'active' && r.id !== cur.id);
+          if ((expectFwd || expectSocks) && !nextFwd && !nextSocks) {
+            broken = true;
+            brokenAt = th + ':' + tp;
+          }
+        }
+        break;
+      }
+      listensInsideOut.push(entryListen.display);
+
+      return {
+        kind: endsAtSocks ? 'forward-to-socks' : 'forward',
+        connect: entryListen.display,
+        agent: lineAgentTitle(agent),
+        finalHost,
+        finalPort,
+        endsAtOperator: isServerTarget(finalHost),
+        listensInsideOut,
+        endsAtSocks,
+        broken,
+        brokenAt,
+        routeIds: [...visited],
+      };
+    }
+
+    function computeAgentDepths(clients, routes) {
+      const depth = new Map();
+      clients.forEach(c => depth.set(c.id, 1));
+      let changed = true;
+      for (let n = 0; n < 12 && changed; n++) {
+        changed = false;
+        for (const r of routes.filter(x => x.kind === 'forward' && x.state === 'active')) {
+          const tgt = clients.find(c => (c.ips || []).includes(r.target_host));
+          if (!tgt || tgt.id === r.agent_id) continue;
+          const next = (depth.get(tgt.id) ?? 1) + 1;
+          if (next > (depth.get(r.agent_id) ?? 1)) {
+            depth.set(r.agent_id, next);
+            changed = true;
+          }
+        }
+      }
+      return depth;
+    }
+
+    function distFromOperator(clients, agentDepths, host, bindOn) {
+      if (bindOn === 'server') return 0;
+      if (isServerTarget(host)) return 0;
+      const agent = clients.find(c => (c.ips || []).includes(host));
+      if (agent) return agentDepths.get(agent.id) ?? 1;
+      const maxD = Math.max(1, ...agentDepths.values());
+      return maxD + 50;
+    }
+
+    function resolveLineDirection(clients, agentDepths, line) {
+      const startHost = parseHP(line.connect).host;
+      const startDist = distFromOperator(clients, agentDepths, startHost, 'agent');
+      let endDist;
+      if (line.endsAtSocks) {
+        endDist = distFromOperator(clients, agentDepths, parseHP(line.endsAtSocks.display).host, line.endsAtSocks.bindOn);
+      } else {
+        endDist = distFromOperator(clients, agentDepths, line.finalHost, line.endsAtOperator ? 'server' : null);
+      }
+      return endDist < startDist ? 'toward-operator' : 'away-from-operator';
+    }
+
+    function buildLiveLines() {
+      const clients = lineClients();
+      const routes = lineRoutes();
+      const forwardIndex = buildListenIndex(clients, routes, 'forward');
+      const socksIndex = buildListenIndex(clients, routes, 'socks');
+      const usedAsHop = new Set();
+      const usedSocks = new Set();
+
+      routes.filter(x => x.kind === 'forward' && x.state === 'active').forEach(r => {
+        buildForwardLine(clients, routes, r, forwardIndex, socksIndex, usedAsHop, usedSocks);
+      });
+
+      const lines = [];
+      routes.filter(x => x.kind === 'forward' && x.state === 'active').forEach(r => {
+        const line = buildForwardLine(clients, routes, r, forwardIndex, socksIndex, new Set(), new Set());
+        if (!line) return;
+        if (usedAsHop.has(r.id) && line.kind !== 'forward-to-socks') return;
+        lines.push(line);
+      });
+
+      routes.filter(x => isSocksKind(x.kind) && x.state === 'active').forEach(r => {
+        if (usedSocks.has(r.id)) return;
+        const agent = lineAgentById(clients, r.agent_id);
+        const listen = parseHP(r.listen_addr, 1080);
+        const bindOn = r.bind_on || 'agent';
+        let connect = listen.host + ':' + listen.port;
+        if (bindOn === 'agent' && (listen.host === '0.0.0.0' || listen.host === '::')) {
+          connect = ((agent?.ips || [])[0] || '?') + ':' + listen.port;
+        }
+        lines.push({
+          kind: 'socks',
+          connect,
+          agent: agent ? lineAgentTitle(agent) : r.agent_id,
+          bindOn,
+          routeIds: [r.id],
+          broken: false,
+        });
+      });
+
+      const agentDepths = computeAgentDepths(clients, routes);
+      lines.forEach(line => {
+        if (line.kind === 'socks') return;
+        line.direction = resolveLineDirection(clients, agentDepths, line);
+      });
+      return lines;
+    }
+
+    function arrowGlyph(direction) {
+      return direction === 'toward-operator'
+        ? '<span class="arr-in">&lt;---</span>'
+        : '<span class="arr-out">---&gt;</span>';
+    }
+
+    function hopSpan(display) {
+      return esc(display) + ' <span class="kind">(port forward)</span>';
+    }
+
+    function layoutForwardPath(direction, endLabel, hops) {
+      if (!hops.length) return endLabel;
+      if (direction === 'toward-operator') {
+        let s = endLabel;
+        hops.forEach(h => { s += ' ' + arrowGlyph(direction) + ' ' + hopSpan(h); });
+        return s;
+      }
+      const entry = hops[hops.length - 1];
+      const inners = hops.slice(0, -1).reverse();
+      let s = hopSpan(entry);
+      inners.forEach(h => { s += ' ' + arrowGlyph(direction) + ' ' + hopSpan(h); });
+      return s + ' ' + arrowGlyph(direction) + ' ' + endLabel;
+    }
+
+    function formatSocksLineText(line) {
+      const tag = line.bindOn === 'server' ? 'SOCKS5 @ server' : 'SOCKS5';
+      return esc(line.connect) + ' <span class="kind">(' + esc(tag) + ')</span>';
+    }
+
+    function formatForwardToSocksLineText(line) {
+      const tag = line.endsAtSocks.bindOn === 'server' ? 'SOCKS5 @ server' : 'SOCKS5';
+      const endLabel = esc(line.endsAtSocks.display) + ' <span class="kind">(' + esc(tag) + ')</span>';
+      return layoutForwardPath(line.direction, endLabel, line.listensInsideOut);
+    }
+
+    function formatTargetEndLabel(host, port, endsAtOperator) {
+      const p = esc(String(port));
+      if (endsAtOperator) {
+        return 'Operator : ' + esc(host) + ' (' + p + ')';
+      }
+      return esc(host) + ' (' + p + ')';
+    }
+
+    function formatForwardLineText(line) {
+      const endLabel = formatTargetEndLabel(line.finalHost, line.finalPort, line.endsAtOperator);
+      return layoutForwardPath(line.direction, endLabel, line.listensInsideOut);
+    }
+
+    function renderLineTextHtml(line) {
+      if (line.kind === 'socks') {
+        return '<div class="line-text">' + formatSocksLineText(line) + '</div>';
+      }
+      if (line.kind === 'forward-to-socks') {
+        let html = '<div class="line-text">' + formatForwardToSocksLineText(line) + '</div>';
+        if (line.broken) html += '<div class="note warn" style="color:var(--offline)">Broken at ' + esc(line.brokenAt) + '</div>';
+        return html;
+      }
+      let html = '<div class="line-text">' + formatForwardLineText(line) + '</div>';
+      if (line.broken) {
+        html += '<div class="note warn" style="color:var(--offline)">Broken at ' + esc(line.brokenAt) + ' — next hop not listening.</div>';
+      }
+      return html;
+    }
+
+    function routeLinesContent() {
+      const live = buildLiveLines();
+      const notLive = (state.routes || []).filter(r => r.state !== 'active');
+      const closeBtn = id => (id ? '<button type="button" class="btn secondary route-close" data-id="' + esc(id) + '" style="padding:0.25rem 0.5rem;font-size:0.72rem">Close</button>' : '—');
+
+      let liveBody;
+      if (!live.length) {
+        liveBody = '<p class="muted">No active routes — nothing listening right now.</p>';
+      } else {
+        liveBody = '<table class="data"><thead><tr><th>#</th><th>Live line</th><th>Dir</th><th>Agent</th><th>Connect at</th><th></th></tr></thead><tbody>' +
+          live.map((l, i) => {
+            const rid = (l.routeIds || [])[0] || '';
+            const dir = l.direction === 'toward-operator' ? '&lt;--' : l.direction === 'away-from-operator' ? '--&gt;' : '—';
+            return '<tr><td>' + (i + 1) + '</td><td>' + renderLineTextHtml(l) +
+              '</td><td class="mono">' + dir + '</td><td>' + esc(l.agent) +
+              '</td><td><code>' + esc(l.connect) + '</code></td><td>' + closeBtn(rid) + '</td></tr>';
+          }).join('') + '</tbody></table>';
+      }
+
+      let deadBody;
+      if (!notLive.length) {
+        deadBody = '<p class="muted">All configured routes are live.</p>';
+      } else {
+        deadBody = '<table class="data"><thead><tr><th>State</th><th>Kind</th><th>Agent</th><th>Listen</th><th>Target</th><th>Note</th><th></th></tr></thead><tbody>' +
+          notLive.map(r => {
+            const c = agentById(r.agent_id);
+            const st = r.state || 'pending';
+            const badgeCls = st === 'error' ? 'off' : (st === 'pending' ? 'wait' : 'off');
+            return '<tr><td><span class="badge ' + badgeCls + '">' + esc(st) + '</span></td><td>' + esc(r.kind) +
+              (r.bind_on ? ' (' + esc(r.bind_on) + ')' : '') + '</td><td>' + (c ? esc(agentTitle(c)) : esc(r.agent_id || '—')) +
+              '</td><td><code>' + esc(r.listen_addr || '—') + '</code></td><td><code>' + esc(r.target || '—') +
+              '</code></td><td class="muted">' + esc(r.message || 'Not listening') + '</td><td>' +
+              (st !== 'closed' ? closeBtn(r.id) : '—') + '</td></tr>';
+          }).join('') + '</tbody></table>';
+      }
+
+      return { liveBody, deadBody, liveCount: live.length };
+    }
+
+    function refreshRouteLines() {
+      const liveEl = document.getElementById('routeLivePanel');
+      const deadEl = document.getElementById('routeDeadPanel');
+      if (!liveEl || !deadEl) return;
+      const { liveBody, deadBody, liveCount } = routeLinesContent();
+      liveEl.innerHTML =
+        '<h3>Live lines <span class="badge live">' + liveCount + ' live</span></h3>' +
+        '<p class="muted">Active routes as readable paths. Dir: &lt;-- toward operator · --&gt; away.</p>' +
+        liveBody;
+      deadEl.innerHTML = '<h3>Not live</h3>' + deadBody;
+      attachRouteCloseHandlers();
+      refreshRouteModalAgentLists();
+    }
+
+    function onlineAgents() {
+      return (state.clients || []).filter(c => c.Online);
+    }
+
+    function closeRouteModal() {
+      if (state.routeModalOpen) saveRouteFormFromDOM(state.routeModalOpen);
+      state.routeModalOpen = null;
+      const backdrop = document.getElementById('routeModalBackdrop');
+      if (backdrop) backdrop.hidden = true;
+      document.getElementById('routeModalBody').innerHTML = '';
+    }
+
+    function bindRouteFormLiveSave(form, kind) {
+      const save = () => saveRouteFormFromDOM(kind);
+      form.addEventListener('input', save);
+      form.addEventListener('change', save);
+    }
+
+    function socksFormHtml(rf, agents) {
+      const socksIpOpts = buildIpPickOptions(rf.socks.agent_id, rf.socks.ip_pick, rf.socks.bind_on === 'agent');
+      const socksIpField = '<label class="field" id="socksIpField"' + (rf.socks.bind_on === 'server' ? ' style="display:none"' : '') +
+        '>Agent IP<select name="ip_pick" id="socksIpPick">' + socksIpOpts + '</select></label>';
+      return '<form id="socksForm">' +
+        '<label class="field">Agent (egress)<select name="agent_id" id="socksAgentSel" required>' + agentSelectOptions(agents, rf.socks.agent_id) + '</select></label>' +
+        '<label class="field">Bind on<select name="bind_on" id="socksBindOn"><option value="agent"' + (rf.socks.bind_on === 'agent' ? ' selected' : '') + '>agent (listen on agent)</option>' +
+        '<option value="server"' + (rf.socks.bind_on === 'server' ? ' selected' : '') + '>server (listen on server → agent)</option></select></label>' +
+        socksIpField +
+        '<label class="field">Bind addr<input name="bind_addr" id="socksBindAddr" value="' + esc(rf.socks.bind_addr) + '" placeholder="0.0.0.0:1080" /></label>' +
+        '<button type="submit" class="btn">Open SOCKS</button><p id="socksMsg" class="form-msg"></p></form>';
+    }
+
+    function forwardFormHtml(rf, agents) {
+      return '<form id="forwardForm">' +
+        '<label class="field">Agent<select name="agent_id" id="forwardAgentSel" required>' + agentSelectOptions(agents, rf.forward.agent_id) + '</select></label>' +
+        '<label class="field">Agent IP<select name="ip_pick" id="forwardIpPick">' + buildIpPickOptions(rf.forward.agent_id, rf.forward.ip_pick, true) + '</select></label>' +
+        '<label class="field">Listen addr<input name="listen_addr" id="forwardListenAddr" value="' + esc(rf.forward.listen_addr) + '" placeholder="0.0.0.0:4444" /></label>' +
+        '<div class="row2"><label class="field">Target host<input name="target_host" value="' + esc(rf.forward.target_host) + '" placeholder="10.0.0.5" required /></label>' +
+        '<label class="field">Port<input name="target_port" type="number" value="' + esc(rf.forward.target_port) + '" required /></label></div>' +
+        '<button type="submit" class="btn">Open forward</button><p id="forwardMsg" class="form-msg"></p></form>';
+    }
+
+    function wireSocksForm(rf) {
+      const bindOnSel = document.getElementById('socksBindOn');
+      const bindAddrIn = document.getElementById('socksBindAddr');
+      const socksAgentSel = document.getElementById('socksAgentSel');
+      const socksIpPick = document.getElementById('socksIpPick');
+      const form = document.getElementById('socksForm');
+      if (!form) return;
+
+      function refreshSocksIpPick() {
+        if (!socksIpPick) return;
+        socksIpPick.innerHTML = buildIpPickOptions(socksAgentSel.value, socksIpPick.value || rf.socks.ip_pick, bindOnSel.value === 'agent');
+      }
+
+      function syncSocksBind() {
+        const ipField = document.getElementById('socksIpField');
+        if (bindOnSel.value === 'server') {
+          bindAddrIn.value = '127.0.0.1:1080';
+          bindAddrIn.placeholder = '127.0.0.1:1080';
+          if (ipField) ipField.style.display = 'none';
+        } else {
+          if (ipField) ipField.style.display = '';
+          if (bindAddrIn.value.startsWith('127.0.0.1:')) {
+            bindAddrIn.value = '0.0.0.0:1080';
+            bindAddrIn.placeholder = '0.0.0.0:1080';
+          }
+          refreshSocksIpPick();
+        }
+        saveRouteFormFromDOM('socks');
+      }
+
+      bindOnSel.addEventListener('change', syncSocksBind);
+      socksAgentSel.addEventListener('change', () => { rf.socks.ip_pick = ''; refreshSocksIpPick(); saveRouteFormFromDOM('socks'); });
+      if (socksIpPick) {
+        socksIpPick.addEventListener('change', () => {
+          const ip = socksIpPick.value;
+          if (!ip) return;
+          bindAddrIn.value = setAddrHost(bindAddrIn.value, ip, 1080);
+          saveRouteFormFromDOM('socks');
+        });
+      }
+      bindRouteFormLiveSave(form, 'socks');
+
+      form.addEventListener('submit', async ev => {
+        ev.preventDefault();
+        saveRouteFormFromDOM('socks');
+        const fd = new FormData(form);
+        const msg = document.getElementById('socksMsg');
+        msg.className = 'form-msg';
+        try {
+          const res = await apiFetch('/api/routes/socks', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agent_id: fd.get('agent_id'),
+              bind_addr: fd.get('bind_addr'),
+              bind_on: fd.get('bind_on'),
+            }),
+          });
+          const t = await res.text();
+          let j; try { j = JSON.parse(t); } catch { j = { message: t }; }
+          if (!res.ok) throw new Error(j.message || t);
+          closeRouteModal();
+        } catch (e) { msg.classList.add('err'); msg.textContent = e.message; }
+      });
+    }
+
+    function wireForwardForm(rf) {
+      const forwardAgentSel = document.getElementById('forwardAgentSel');
+      const forwardIpPick = document.getElementById('forwardIpPick');
+      const forwardListenAddr = document.getElementById('forwardListenAddr');
+      const form = document.getElementById('forwardForm');
+      if (!form) return;
+
+      function refreshForwardIpPick() {
+        if (!forwardIpPick) return;
+        forwardIpPick.innerHTML = buildIpPickOptions(forwardAgentSel.value, forwardIpPick.value || rf.forward.ip_pick, true);
+      }
+
+      forwardAgentSel.addEventListener('change', () => { rf.forward.ip_pick = ''; refreshForwardIpPick(); saveRouteFormFromDOM('forward'); });
+      if (forwardIpPick) {
+        forwardIpPick.addEventListener('change', () => {
+          const ip = forwardIpPick.value;
+          if (!ip) return;
+          forwardListenAddr.value = setAddrHost(forwardListenAddr.value, ip, 4444);
+          saveRouteFormFromDOM('forward');
+        });
+      }
+      bindRouteFormLiveSave(form, 'forward');
+
+      form.addEventListener('submit', async ev => {
+        ev.preventDefault();
+        saveRouteFormFromDOM('forward');
+        const fd = new FormData(form);
+        const msg = document.getElementById('forwardMsg');
+        msg.className = 'form-msg';
+        try {
+          const res = await apiFetch('/api/routes/forward', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agent_id: fd.get('agent_id'),
+              listen_addr: fd.get('listen_addr'),
+              target_host: fd.get('target_host'),
+              target_port: parseInt(fd.get('target_port') || '0', 10),
+            }),
+          });
+          const t = await res.text();
+          let j; try { j = JSON.parse(t); } catch { j = { message: t }; }
+          if (!res.ok) throw new Error(j.message || t);
+          closeRouteModal();
+        } catch (e) { msg.classList.add('err'); msg.textContent = e.message; }
+      });
+    }
+
+    function refreshRouteModalAgentLists() {
+      if (!state.routeModalOpen) return;
+      const agents = onlineAgents();
+      const rf = routeFormState();
+      if (state.routeModalOpen === 'socks') {
+        const sel = document.getElementById('socksAgentSel');
+        if (!sel) return;
+        const cur = sel.value || rf.socks.agent_id;
+        sel.innerHTML = agentSelectOptions(agents, cur);
+        const ipPick = document.getElementById('socksIpPick');
+        if (ipPick && document.getElementById('socksBindOn')?.value === 'agent') {
+          ipPick.innerHTML = buildIpPickOptions(sel.value, ipPick.value || rf.socks.ip_pick, true);
+        }
+      } else if (state.routeModalOpen === 'forward') {
+        const sel = document.getElementById('forwardAgentSel');
+        if (!sel) return;
+        const cur = sel.value || rf.forward.agent_id;
+        sel.innerHTML = agentSelectOptions(agents, cur);
+        const ipPick = document.getElementById('forwardIpPick');
+        if (ipPick) ipPick.innerHTML = buildIpPickOptions(sel.value, ipPick.value || rf.forward.ip_pick, true);
+      }
+    }
+
+    function openRouteModal(kind) {
+      const agents = onlineAgents();
+      const rf = routeFormState();
+      if (!rf.socks.agent_id && agents.length) rf.socks.agent_id = agents[0].ID;
+      if (!rf.forward.agent_id && agents.length) rf.forward.agent_id = agents[0].ID;
+
+      state.routeModalOpen = kind;
+      document.getElementById('routeModalTitle').textContent = kind === 'socks' ? 'Create SOCKS5' : 'Create TCP forward';
+      document.getElementById('routeModalBody').innerHTML = kind === 'socks' ? socksFormHtml(rf, agents) : forwardFormHtml(rf, agents);
+      document.getElementById('routeModalBackdrop').hidden = false;
+
+      if (kind === 'socks') wireSocksForm(rf);
+      else wireForwardForm(rf);
+    }
+
+    function mountRoutePage() {
+      document.getElementById('view').innerHTML =
+        '<h2>Route</h2>' +
+        '<p class="muted">Create SOCKS or TCP forward on an online agent. Each agent may have <strong>multiple local IPs</strong>.</p>' +
+        '<div class="route-toolbar">' +
+        '<button type="button" class="btn" id="btnCreateSocks">+ Create SOCKS5</button>' +
+        '<button type="button" class="btn secondary" id="btnCreateForward">+ Create TCP forward</button>' +
+        '</div>' +
+        '<div id="routeLivePanel" class="route-section card"></div>' +
+        '<div id="routeDeadPanel" class="route-section card"></div>';
+
+      document.getElementById('btnCreateSocks').addEventListener('click', () => openRouteModal('socks'));
+      document.getElementById('btnCreateForward').addEventListener('click', () => openRouteModal('forward'));
+      refreshRouteLines();
+      state.routeMounted = true;
+    }
+
+    function paintRoute() {
+      if (!state.routeMounted || !document.getElementById('routeLivePanel')) {
+        mountRoutePage();
+      } else {
+        refreshRouteLines();
+      }
+    }
+
+    function initRouteModalChrome() {
+      const backdrop = document.getElementById('routeModalBackdrop');
+      document.getElementById('routeModalClose').addEventListener('click', closeRouteModal);
+      backdrop.addEventListener('click', ev => { if (ev.target === backdrop) closeRouteModal(); });
+      document.addEventListener('keydown', ev => {
+        if (ev.key === 'Escape' && state.routeModalOpen) closeRouteModal();
+      });
+    }
+
+    function attachRouteCloseHandlers() {
+      document.querySelectorAll('.route-close').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-id');
+          try {
+            const res = await apiFetch('/api/routes/' + encodeURIComponent(id), { method: 'DELETE' });
+            if (!res.ok) throw new Error(await res.text());
+          } catch (e) { alert(e.message); }
+        });
+      });
+    }
+
+    function buildIpPickOptions(agentId, selected, includeAll) {
+      let html = '<option value="">— pick agent IP —</option>';
+      if (includeAll) {
+        html += '<option value="0.0.0.0"' + (selected === '0.0.0.0' ? ' selected' : '') + '>0.0.0.0 (all interfaces)</option>';
+      }
+      const c = agentById(agentId);
+      if (!c) return html;
+      collectAgentIPs(c).forEach(ip => {
+        html += '<option value="' + esc(ip) + '"' + (selected === ip ? ' selected' : '') + '>' + esc(ip) + '</option>';
+      });
+      return html;
+    }
+
+    function agentSelectOptions(agents, selectedId) {
+      if (!agents.length) return '<option value="">(no online agents)</option>';
+      return agents.map(c => {
+        const id = c.ID;
+        const sel = id === selectedId ? ' selected' : '';
+        return '<option value="' + esc(id) + '"' + sel + '>' + esc(agentTitle(c)) + '</option>';
+      }).join('');
     }
 
     function agentTitle(c) {
@@ -260,118 +1030,18 @@
       });
     }
 
-    function renderRoute() {
-      const agents = (state.clients || []).filter(c => c.Online);
-      const agentOpts = agents.length
-        ? agents.map(c => '<option value="' + esc(c.ID) + '">' + esc(agentTitle(c)) + '</option>').join('')
-        : '<option value="">(no online agents)</option>';
-      const routes = state.routes || [];
-      const rows = routes.length ? routes.map(r => {
-        const st = r.state || 'pending';
-        const badgeCls = st === 'active' ? 'on' : (st === 'error' ? 'off' : '');
-        return '<tr><td><code>' + esc(r.id) + '</code></td><td>' + esc(r.agent_hostname || r.agent_id || '—') +
-          '</td><td>' + esc(r.kind) + (r.bind_on ? ' (' + esc(r.bind_on) + ')' : '') +
-          '</td><td>' + esc(r.listen_addr || '—') + '</td><td>' + esc(r.target || '—') +
-          '</td><td><span class="badge ' + badgeCls + '">' + esc(st) + '</span></td>' +
-          '<td>' + (st !== 'closed' ? '<button type="button" class="btn secondary route-close" data-id="' + esc(r.id) + '">Close</button>' : '—') +
-          '</td></tr>';
-      }).join('') : '<tr><td colspan="7" class="muted">No active routes.</td></tr>';
-
-      document.getElementById('view').innerHTML =
-        '<h2>Route</h2>' +
-        '<p class="muted">SOCKS5: bind on <strong>agent</strong> (direct) or <strong>server</strong> (egress via agent). TCP forward is always on the agent.</p>' +
-        '<div class="grid" style="grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">' +
-        '<div class="card"><h3 style="margin:0 0 0.5rem;font-size:0.95rem">SOCKS5</h3>' +
-        '<form id="socksForm"><label class="field">Agent (egress)<select name="agent_id" required>' + agentOpts + '</select></label>' +
-        '<label class="field">Bind on<select name="bind_on" id="socksBindOn"><option value="agent">agent (listen on agent)</option>' +
-        '<option value="server">server (listen on server → agent)</option></select></label>' +
-        '<label class="field">Bind addr<input name="bind_addr" id="socksBindAddr" value="0.0.0.0:1080" placeholder="0.0.0.0:1080" /></label>' +
-        '<button type="submit" class="btn">Open SOCKS</button><p id="socksMsg" class="form-msg"></p></form></div>' +
-        '<div class="card"><h3 style="margin:0 0 0.5rem;font-size:0.95rem">TCP forward</h3>' +
-        '<form id="forwardForm"><label class="field">Agent<select name="agent_id" required>' + agentOpts + '</select></label>' +
-        '<label class="field">Listen addr<input name="listen_addr" value="0.0.0.0:4444" /></label>' +
-        '<div class="row2"><label class="field">Target host<input name="target_host" placeholder="10.0.0.5" required /></label>' +
-        '<label class="field">Port<input name="target_port" type="number" value="3389" required /></label></div>' +
-        '<button type="submit" class="btn">Open forward</button><p id="forwardMsg" class="form-msg"></p></form></div></div>' +
-        '<div class="card"><h3 style="margin:0 0 0.5rem;font-size:0.95rem">Active routes</h3>' +
-        '<table class="data"><thead><tr><th>ID</th><th>Agent</th><th>Kind</th><th>Listen</th><th>Target</th><th>State</th><th></th></tr></thead><tbody>' +
-        rows + '</tbody></table></div>';
-
-      const bindOnSel = document.getElementById('socksBindOn');
-      const bindAddrIn = document.getElementById('socksBindAddr');
-      function syncSocksBind() {
-        if (bindOnSel.value === 'server') {
-          bindAddrIn.value = '127.0.0.1:1080';
-          bindAddrIn.placeholder = '127.0.0.1:1080';
-        } else {
-          bindAddrIn.value = '0.0.0.0:1080';
-          bindAddrIn.placeholder = '0.0.0.0:1080';
-        }
-      }
-      bindOnSel.addEventListener('change', syncSocksBind);
-      syncSocksBind();
-
-      document.getElementById('socksForm').addEventListener('submit', async ev => {
-        ev.preventDefault();
-        const fd = new FormData(ev.target);
-        const msg = document.getElementById('socksMsg');
-        msg.className = 'form-msg';
-        try {
-          const res = await apiFetch('/api/routes/socks', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              agent_id: fd.get('agent_id'),
-              bind_addr: fd.get('bind_addr'),
-              bind_on: fd.get('bind_on'),
-            }),
-          });
-          const t = await res.text();
-          let j; try { j = JSON.parse(t); } catch { j = { message: t }; }
-          if (!res.ok) throw new Error(j.message || t);
-          msg.classList.add('ok'); msg.textContent = 'Route ' + (j.id || '') + ' pending…';
-        } catch (e) { msg.classList.add('err'); msg.textContent = e.message; }
-      });
-
-      document.getElementById('forwardForm').addEventListener('submit', async ev => {
-        ev.preventDefault();
-        const fd = new FormData(ev.target);
-        const msg = document.getElementById('forwardMsg');
-        msg.className = 'form-msg';
-        try {
-          const res = await apiFetch('/api/routes/forward', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              agent_id: fd.get('agent_id'),
-              listen_addr: fd.get('listen_addr'),
-              target_host: fd.get('target_host'),
-              target_port: parseInt(fd.get('target_port') || '0', 10),
-            }),
-          });
-          const t = await res.text();
-          let j; try { j = JSON.parse(t); } catch { j = { message: t }; }
-          if (!res.ok) throw new Error(j.message || t);
-          msg.classList.add('ok'); msg.textContent = 'Route ' + (j.id || '') + ' pending…';
-        } catch (e) { msg.classList.add('err'); msg.textContent = e.message; }
-      });
-
-      document.querySelectorAll('.route-close').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const id = btn.getAttribute('data-id');
-          try {
-            const res = await apiFetch('/api/routes/' + encodeURIComponent(id), { method: 'DELETE' });
-            if (!res.ok) throw new Error(await res.text());
-          } catch (e) { alert(e.message); }
-        });
-      });
-    }
-
     function paint() {
       paintNav();
       const r = routeName();
-      if (r === 'dashboard') renderDashboard();
-      else if (r === 'agents') renderAgents();
-      else if (r === 'topology') renderTopology();
-      else if (r === 'route') renderRoute();
+      if (state.currentView === 'route' && r !== 'route') {
+        state.routeMounted = false;
+        closeRouteModal();
+      }
+      state.currentView = r;
+      if (r === 'dashboard') { state.routeMounted = false; renderDashboard(); }
+      else if (r === 'agents') { state.routeMounted = false; renderAgents(); }
+      else if (r === 'topology') { state.routeMounted = false; renderTopology(); }
+      else if (r === 'route') paintRoute();
     }
 
     let ws;
@@ -388,7 +1058,11 @@
             state.clients = data.clients || [];
             state.routes = data.routes || [];
           }
-          paint();
+          if (routeName() === 'route') {
+            paintRoute();
+          } else {
+            paint();
+          }
         } catch (_) {}
       };
       ws.onclose = () => { setWsPill('', 'WS retry…'); setTimeout(connectWS, 2500); };
@@ -397,6 +1071,7 @@
     async function startApp() {
       document.getElementById('loginGate').hidden = true;
       document.getElementById('appShell').hidden = false;
+      initRouteModalChrome();
       paint();
       window.addEventListener('hashchange', paint);
       connectWS();

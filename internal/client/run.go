@@ -162,7 +162,7 @@ func serveInboundControl(ctx context.Context, conn *websocket.Conn, cfg Config, 
 }
 
 func heartbeatLoop(ws *wsWriter, clientID, osUser string, done <-chan struct{}) {
-	t := time.NewTicker(45 * time.Second)
+	t := time.NewTicker(60 * time.Second)
 	defer t.Stop()
 	for {
 		select {

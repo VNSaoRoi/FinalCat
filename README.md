@@ -109,7 +109,7 @@ After connect, the agent appears under **Agents** in the UI.
 | **Dashboard** | Online / offline counts and agent list |
 | **Agents** | Agent details, edit upstreams, attach bind agents |
 | **Topology** | Simple view of operator → agents |
-| **Route** | Open SOCKS5 or TCP port-forward through an agent (pivot layer — use **ligolo-ng**, **chisel**, **proxychains**, etc. on top as needed) |
+| **Route** | Create SOCKS5 or TCP forwards; **Live lines** show active paths with direction toward/away from operator (pivot layer — use **ligolo-ng**, **chisel**, **proxychains**, etc. on top as needed) |
 
 Copy agent binaries to targets yourself (`scp`, `ssh`, impacket, or your own playbook). Use the server’s reachable IP and port **31747** for `-r`.
 
@@ -123,12 +123,16 @@ Use when the target only listens (bind mode) and the server can reach `bind_host
 
 All pivot traffic is **raw TCP on the agent** (or on the server for server-side SOCKS), not inside the control WebSocket.
 
+### Live lines
+
+Active routes appear as readable paths in **Live lines** (direction `<--` = toward operator, `-->` = away). Pending, error, and closed routes are listed under **Not live**. Agents may report **multiple local IPs**; chain detection uses all of them.
+
 ### SOCKS5
 
-1. Go to **Route**.
+1. Go to **Route** → **+ Create SOCKS5**.
 2. Select an **online agent** (egress).
 3. **Bind on**:
-   - **agent** — SOCKS listens on the agent; you connect to `agent_ip:port` (default `0.0.0.0:1080`).
+   - **agent** — SOCKS listens on the agent; you connect to `agent_ip:port` (default `0.0.0.0:1080`). Pick an agent IP from the dropdown to fill bind addr quickly.
    - **server** — SOCKS listens on the server (default `127.0.0.1:1080`); traffic exits via the agent (good when you only have SSH to the server).
 4. Click **Open SOCKS**.
 5. Wait until state is **active**, then point tools at the SOCKS address:
@@ -142,18 +146,19 @@ Plain SOCKS5 (no TLS, no auth).
 
 ### TCP forward
 
-1. **Route** → **TCP forward** section.
-2. Choose agent, **listen addr** on the agent (e.g. `0.0.0.0:4444`).
-3. Set **target host** and **port** (e.g. internal RDP `10.0.0.5:3389`).
-4. **Open forward** → connect to `agent_ip:4444` from your machine.
+1. **Route** → **+ Create TCP forward**.
+2. Choose agent and optional **Agent IP** (listen addr helper).
+3. Set **listen addr** on the agent (e.g. `0.0.0.0:4444`).
+4. Set **target host** and **port** (e.g. internal RDP `10.0.0.5:3389`).
+5. **Open forward** → connect to `agent_ip:4444` from your machine.
 
 ### Close a route
 
-Use **Close** on the row in **Active routes**, or delete when the agent goes offline.
+Use **Close** on a row in **Live lines** or **Not live**, or wait until the agent goes offline.
 
 ### Multi-hop
 
-There is no automatic chain builder. Open several forwards manually (e.g. agent C → DC, agent B → C, connect to agent B) or combine SOCKS + forward as needed.
+When forward targets match another agent’s listen (including `0.0.0.0:port` resolved via agent IPs), **Live lines** chains hops automatically. You can also combine SOCKS + forward manually.
 
 ---
 

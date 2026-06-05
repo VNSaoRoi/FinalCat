@@ -78,6 +78,24 @@ func (r *Registry) Touch(id string) {
 	}
 }
 
+func (r *Registry) ApplyHeartbeat(id string, localIPs []string, osUser string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.clients[id]
+	if !ok {
+		return
+	}
+	c.LastSeen = time.Now().UTC()
+	c.Online = true
+	if len(localIPs) > 0 {
+		c.LocalIPs = append([]string(nil), localIPs...)
+	}
+	if osUser != "" {
+		c.OSUser = osUser
+	}
+	c.Revision = r.rev.Add(1)
+}
+
 func (r *Registry) SetOffline(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

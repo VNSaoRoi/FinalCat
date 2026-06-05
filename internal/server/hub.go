@@ -230,7 +230,12 @@ func (h *Hub) runAgentLoop(s *agentSession) {
 				h.notifyUI()
 			}
 		case protocol.TypeHeartbeat:
-			h.reg.Touch(id)
+			var hb protocol.Heartbeat
+			if json.Unmarshal(data, &hb) == nil {
+				h.reg.ApplyHeartbeat(id, hb.LocalIPs, hb.OSUser)
+			} else {
+				h.reg.Touch(id)
+			}
 			h.notifyUI()
 		case protocol.TypeRouteEvent:
 			var ev protocol.RouteEvent
