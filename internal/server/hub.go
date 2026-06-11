@@ -161,10 +161,51 @@ func recordFromRegister(reg *protocol.Register, remoteAddr string) *ClientRecord
 	return rec
 }
 
+func (h *Hub) closeSessionsForPersistentID(pid, exceptID string) {
+	if pid == "" {
+		return
+	}
+	h.mu.RLock()
+	type pair struct {
+		id string
+		s  *agentSession
+	}
+	var candidates []pair
+	for sid, s := range h.agents {
+		if sid != exceptID {
+			candidates = append(candidates, pair{sid, s})
+		}
+	}
+	h.mu.RUnlock()
+	for _, p := range candidates {
+		if c, ok := h.reg.Get(p.id); ok && c.PersistentID == pid {
+			_ = p.s.conn.Close()
+		}
+	}
+}
+
 // startAgentSession registers agent and runs control loop. Returns client id.
 func (h *Hub) startAgentSession(conn *websocket.Conn, reg *protocol.Register, remoteAddr string) string {
-	id := randomID()
-	snap := h.reg.Register(id, recordFromRegister(reg, remoteAddr))
+	incoming := recordFromRegister(reg, remoteAddr)
+	pid := incoming.PersistentID
+
+	id := ""
+	if pid != "" {
+		if existing, ok := h.reg.FindIDByPersistentID(pid); ok {
+			id = existing
+		}
+	}
+	if id == "" {
+		id = randomID()
+	}
+
+	h.closeSessionsForPersistentID(pid, id)
+	h.reg.PurgeDuplicatePersistentID(id, pid)
+
+	snap := h.reg.Register(id, incoming)
+	if pid != "" && id != "" {
+		log.Printf("agent session: persistent_id=%s client_id=%s hostname=%s", pid, id, snap.Hostname)
+	}
 	ack, _ := json.Marshal(protocol.Ack{
 		Type: protocol.TypeAck, ClientID: id, Revision: snap.Revision, Message: "registered",
 	})

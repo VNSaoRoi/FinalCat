@@ -374,6 +374,7 @@ type UISnapshot struct {
 }
 
 func (h *Hub) uiSnapshotJSON() ([]byte, error) {
+	h.reg.DedupeAllPersistentIDs()
 	snap := UISnapshot{
 		Clients: h.reg.Snapshot(),
 		Routes:  h.routes.Snapshot(),

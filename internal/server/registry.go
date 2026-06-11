@@ -43,6 +43,49 @@ func NewRegistry() *Registry {
 	return &Registry{clients: make(map[string]*ClientRecord)}
 }
 
+// FindIDByPersistentID returns the canonical client ID for a stable agent identity.
+// Prefers an online record; otherwise the most recently seen offline record.
+func (r *Registry) FindIDByPersistentID(pid string) (string, bool) {
+	if pid == "" {
+		return "", false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var offlineID string
+	var offlineSeen time.Time
+	for id, c := range r.clients {
+		if c.PersistentID != pid {
+			continue
+		}
+		if c.Online {
+			return id, true
+		}
+		if offlineID == "" || c.LastSeen.After(offlineSeen) {
+			offlineID = id
+			offlineSeen = c.LastSeen
+		}
+	}
+	if offlineID != "" {
+		return offlineID, true
+	}
+	return "", false
+}
+
+// PurgeDuplicatePersistentID removes extra registry rows sharing the same persistent_id.
+func (r *Registry) PurgeDuplicatePersistentID(keepID, pid string) {
+	if pid == "" || keepID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, c := range r.clients {
+		if id != keepID && c.PersistentID == pid {
+			delete(r.clients, id)
+			r.rev.Add(1)
+		}
+	}
+}
+
 func (r *Registry) Register(id string, reg *ClientRecord) *ClientRecord {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -135,6 +178,42 @@ func (r *Registry) Get(id string) (*ClientRecord, bool) {
 	cp.Listeners = append([]ListenerRecord(nil), c.Listeners...)
 	cp.UpstreamEndpoints = append([]string(nil), c.UpstreamEndpoints...)
 	return &cp, true
+}
+
+// DedupeAllPersistentIDs keeps one registry row per persistent_id (online preferred, else newest).
+func (r *Registry) DedupeAllPersistentIDs() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	groups := make(map[string][]string)
+	for id, c := range r.clients {
+		if c.PersistentID != "" {
+			groups[c.PersistentID] = append(groups[c.PersistentID], id)
+		}
+	}
+	changed := false
+	for _, ids := range groups {
+		if len(ids) < 2 {
+			continue
+		}
+		keep := ids[0]
+		for _, id := range ids[1:] {
+			kc, ic := r.clients[keep], r.clients[id]
+			if ic.Online && !kc.Online {
+				keep = id
+			} else if ic.Online == kc.Online && ic.LastSeen.After(kc.LastSeen) {
+				keep = id
+			}
+		}
+		for _, id := range ids {
+			if id != keep {
+				delete(r.clients, id)
+				changed = true
+			}
+		}
+	}
+	if changed {
+		r.rev.Add(1)
+	}
 }
 
 func (r *Registry) Snapshot() []ClientRecord {
