@@ -15,6 +15,7 @@ type ListenerRecord struct {
 
 type ClientRecord struct {
 	ID                 string           `json:"ID"`
+	PersistentID       string           `json:"PersistentID,omitempty"`
 	Hostname           string           `json:"Hostname"`
 	OS                 string           `json:"OS"`
 	GOArch             string           `json:"GOArch,omitempty"`
@@ -50,6 +51,9 @@ func (r *Registry) Register(id string, reg *ClientRecord) *ClientRecord {
 	if !ok {
 		rec = &ClientRecord{ID: id, ConnectedAt: now}
 		r.clients[id] = rec
+	}
+	if reg.PersistentID != "" {
+		rec.PersistentID = reg.PersistentID
 	}
 	rec.Hostname = reg.Hostname
 	rec.OS = reg.OS

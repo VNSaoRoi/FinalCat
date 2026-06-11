@@ -88,6 +88,7 @@ func serveInboundControl(ctx context.Context, conn *websocket.Conn, cfg Config, 
 		Listeners:          bindListeners(cfg),
 		UpstreamEndpoints:  eps,
 		ActiveUpstreamUsed: activeUpstream,
+		PersistentID:       LoadPersistentID(),
 		AgentMode:          mode,
 	})
 	if err := ws.WriteText(reg); err != nil {

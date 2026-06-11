@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -33,15 +34,17 @@ type RouteManager struct {
 	tunnelWait map[string]*tunnelWaiter
 	tunnelMu   sync.Mutex
 	hub        *Hub
+	catalog    *RouteCatalog
 }
 
-func NewRouteManager(hub *Hub) *RouteManager {
+func NewRouteManager(hub *Hub, catalog *RouteCatalog) *RouteManager {
 	return &RouteManager{
 		routes:     make(map[string]*RouteRecord),
 		socksSrv:   make(map[string]*socksServerRoute),
 		tunnels:    make(map[string]*activeTunnel),
 		tunnelWait: make(map[string]*tunnelWaiter),
 		hub:        hub,
+		catalog:    catalog,
 	}
 }
 
@@ -66,16 +69,52 @@ func (rm *RouteManager) Get(id string) (*RouteRecord, bool) {
 	return &cp, true
 }
 
+func (rm *RouteManager) OnAgentConnected(agentID, persistentID, hostname, osUser string) {
+	if rm.catalog == nil || persistentID == "" {
+		return
+	}
+	rm.catalog.TouchAgent(persistentID, agentID, hostname, osUser)
+	_ = rm.catalog.Save()
+	rm.RestoreDesired(agentID, persistentID)
+}
+
+func (rm *RouteManager) persistRoute(agentID string, rec *RouteRecord) {
+	if rm.catalog == nil {
+		return
+	}
+	pid := rm.hub.PersistentIDFor(agentID)
+	if pid == "" {
+		return
+	}
+	rm.catalog.UpsertRoute(pid, desiredFromRecord(rec))
+	_ = rm.catalog.Save()
+}
+
+func (rm *RouteManager) unpersistRoute(agentID, routeID string) {
+	if rm.catalog == nil {
+		return
+	}
+	pid := rm.hub.PersistentIDFor(agentID)
+	if pid == "" {
+		return
+	}
+	rm.catalog.RemoveRoute(pid, routeID)
+	_ = rm.catalog.Save()
+}
+
 func (rm *RouteManager) OpenSocks(agentID, bindAddr string) (*RouteRecord, error) {
+	return rm.openSocks(agentID, newRouteID(), bindAddr)
+}
+
+func (rm *RouteManager) openSocks(agentID, routeID, bindAddr string) (*RouteRecord, error) {
 	if bindAddr == "" {
 		return nil, fmt.Errorf("bind_addr required")
 	}
 	if !rm.hub.AgentOnline(agentID) {
 		return nil, fmt.Errorf("agent offline")
 	}
-	id := newRouteID()
 	rec := &RouteRecord{
-		ID:         id,
+		ID:         routeID,
 		AgentID:    agentID,
 		Kind:       protocol.RouteKindSocks,
 		ListenAddr: bindAddr,
@@ -88,18 +127,23 @@ func (rm *RouteManager) OpenSocks(agentID, bindAddr string) (*RouteRecord, error
 		rec.AgentHost = c.Hostname
 	}
 	rm.mu.Lock()
-	rm.routes[id] = rec
+	rm.routes[routeID] = rec
 	rm.mu.Unlock()
 	if !rm.hub.SendAgent(agentID, protocol.RouteOpenSocks{
-		Type: protocol.TypeRouteOpenSocks, RouteID: id, BindAddr: bindAddr,
+		Type: protocol.TypeRouteOpenSocks, RouteID: routeID, BindAddr: bindAddr,
 	}) {
-		rm.remove(id)
+		rm.remove(routeID)
 		return nil, fmt.Errorf("failed to send route command to agent")
 	}
+	rm.persistRoute(agentID, rec)
 	return rec, nil
 }
 
 func (rm *RouteManager) OpenForward(agentID, listenAddr, targetHost string, targetPort int) (*RouteRecord, error) {
+	return rm.openForward(agentID, newRouteID(), listenAddr, targetHost, targetPort)
+}
+
+func (rm *RouteManager) openForward(agentID, routeID, listenAddr, targetHost string, targetPort int) (*RouteRecord, error) {
 	if listenAddr == "" || targetHost == "" || targetPort <= 0 || targetPort > 65535 {
 		return nil, fmt.Errorf("listen_addr, target_host, target_port required")
 	}
@@ -107,9 +151,8 @@ func (rm *RouteManager) OpenForward(agentID, listenAddr, targetHost string, targ
 		return nil, fmt.Errorf("agent offline")
 	}
 	target := fmt.Sprintf("%s:%d", targetHost, targetPort)
-	id := newRouteID()
 	rec := &RouteRecord{
-		ID:         id,
+		ID:         routeID,
 		AgentID:    agentID,
 		Kind:       protocol.RouteKindForward,
 		ListenAddr: listenAddr,
@@ -122,18 +165,19 @@ func (rm *RouteManager) OpenForward(agentID, listenAddr, targetHost string, targ
 		rec.AgentHost = c.Hostname
 	}
 	rm.mu.Lock()
-	rm.routes[id] = rec
+	rm.routes[routeID] = rec
 	rm.mu.Unlock()
 	if !rm.hub.SendAgent(agentID, protocol.RouteOpenForward{
 		Type:       protocol.TypeRouteOpenForward,
-		RouteID:    id,
+		RouteID:    routeID,
 		ListenAddr: listenAddr,
 		TargetHost: targetHost,
 		TargetPort: targetPort,
 	}) {
-		rm.remove(id)
+		rm.remove(routeID)
 		return nil, fmt.Errorf("failed to send route command to agent")
 	}
+	rm.persistRoute(agentID, rec)
 	return rec, nil
 }
 
@@ -145,10 +189,12 @@ func (rm *RouteManager) Close(id string) error {
 		return fmt.Errorf("route not found")
 	}
 	if rec.State == protocol.RouteStateClosed {
+		rm.unpersistRoute(rec.AgentID, id)
 		return nil
 	}
 	if rec.Kind == protocol.RouteKindSocksServer {
 		rm.closeSocksServer(id, "closed by operator", protocol.RouteStateClosed)
+		rm.unpersistRoute(rec.AgentID, id)
 		return nil
 	}
 	if rm.hub.AgentOnline(rec.AgentID) {
@@ -157,6 +203,7 @@ func (rm *RouteManager) Close(id string) error {
 		})
 	}
 	rm.setState(id, protocol.RouteStateClosed, "closed by operator")
+	rm.unpersistRoute(rec.AgentID, id)
 	return nil
 }
 
@@ -200,30 +247,102 @@ func (rm *RouteManager) HandleEvent(agentID string, ev *protocol.RouteEvent) {
 		}
 	}
 	rm.mu.Unlock()
+
+	if ev.State == protocol.RouteStateActive {
+		rm.persistRoute(agentID, rec)
+	}
 }
 
+// AgentDisconnected tears down live tunnels but keeps desired routes in the catalog for reconnect restore.
 func (rm *RouteManager) AgentDisconnected(agentID string) {
+	pid := rm.hub.PersistentIDFor(agentID)
+
 	rm.mu.RLock()
 	var serverRoutes []string
+	var toSync []*RouteRecord
 	for id, r := range rm.routes {
-		if r.AgentID == agentID && r.Kind == protocol.RouteKindSocksServer && r.State != protocol.RouteStateClosed {
+		if r.AgentID != agentID {
+			continue
+		}
+		if r.Kind == protocol.RouteKindSocksServer && r.State != protocol.RouteStateClosed {
 			serverRoutes = append(serverRoutes, id)
 		}
+		if r.State != protocol.RouteStateClosed {
+			cp := *r
+			toSync = append(toSync, &cp)
+		}
+		_ = id
 	}
 	rm.mu.RUnlock()
+
+	if pid != "" && rm.catalog != nil {
+		for _, r := range toSync {
+			rm.catalog.UpsertRoute(pid, desiredFromRecord(r))
+		}
+		_ = rm.catalog.Save()
+	}
+
 	for _, id := range serverRoutes {
-		rm.closeSocksServer(id, "agent disconnected", protocol.RouteStateClosed)
+		rm.closeSocksServer(id, "agent offline", protocol.RouteStateClosed)
 	}
 
 	rm.mu.Lock()
-	defer rm.mu.Unlock()
-	now := time.Now().UTC()
-	for _, r := range rm.routes {
-		if r.AgentID == agentID && r.State != protocol.RouteStateClosed {
-			r.State = protocol.RouteStateClosed
-			r.Message = "agent disconnected"
-			r.UpdatedAt = now
+	for id, r := range rm.routes {
+		if r.AgentID == agentID {
+			delete(rm.routes, id)
 		}
+	}
+	rm.mu.Unlock()
+}
+
+// RestoreDesired re-opens routes saved for this agent identity after reconnect.
+func (rm *RouteManager) RestoreDesired(agentID, persistentID string) {
+	if rm.catalog == nil || persistentID == "" || !rm.hub.AgentOnline(agentID) {
+		return
+	}
+	desired := rm.catalog.Routes(persistentID)
+	if len(desired) == 0 {
+		return
+	}
+	log.Printf("route restore: agent=%s persistent_id=%s routes=%d", agentID, persistentID, len(desired))
+	for _, dr := range desired {
+		rm.restoreOne(agentID, dr)
+	}
+}
+
+func (rm *RouteManager) restoreOne(agentID string, dr DesiredRoute) {
+	rm.mu.RLock()
+	_, live := rm.routes[dr.ID]
+	rm.mu.RUnlock()
+	if live {
+		return
+	}
+
+	var err error
+	switch dr.Kind {
+	case protocol.RouteKindSocks:
+		if dr.BindOn == "server" {
+			_, err = rm.openSocksServer(agentID, dr.ID, dr.ListenAddr)
+		} else {
+			_, err = rm.openSocks(agentID, dr.ID, dr.ListenAddr)
+		}
+	case protocol.RouteKindSocksServer:
+		_, err = rm.openSocksServer(agentID, dr.ID, dr.ListenAddr)
+	case protocol.RouteKindForward:
+		host, port := dr.TargetHost, dr.TargetPort
+		if host == "" && dr.Target != "" {
+			host, port = splitTargetHostPort(dr.Target)
+		}
+		if host == "" || port <= 0 {
+			log.Printf("route restore skip id=%s: bad target", dr.ID)
+			return
+		}
+		_, err = rm.openForward(agentID, dr.ID, dr.ListenAddr, host, port)
+	default:
+		return
+	}
+	if err != nil {
+		log.Printf("route restore id=%s: %v", dr.ID, err)
 	}
 }
 

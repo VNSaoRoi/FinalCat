@@ -33,13 +33,17 @@ type activeTunnel struct {
 }
 
 func (rm *RouteManager) OpenSocksServer(agentID, bindAddr string) (*RouteRecord, error) {
+	return rm.openSocksServer(agentID, newRouteID(), bindAddr)
+}
+
+func (rm *RouteManager) openSocksServer(agentID, routeID, bindAddr string) (*RouteRecord, error) {
 	if bindAddr == "" {
 		bindAddr = "127.0.0.1:1080"
 	}
 	if !rm.hub.AgentOnline(agentID) {
 		return nil, fmt.Errorf("agent offline")
 	}
-	id := newRouteID()
+	id := routeID
 	rec := &RouteRecord{
 		ID:         id,
 		AgentID:    agentID,
@@ -72,6 +76,7 @@ func (rm *RouteManager) OpenSocksServer(agentID, bindAddr string) (*RouteRecord,
 	rec.State = protocol.RouteStateActive
 	rec.UpdatedAt = time.Now().UTC()
 	log.Printf("route socks_server active id=%s listen=%s via agent=%s", id, bindAddr, agentID)
+	rm.persistRoute(agentID, rec)
 	rm.hub.notifyUI()
 	return rec, nil
 }

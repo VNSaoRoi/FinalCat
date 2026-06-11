@@ -50,6 +50,7 @@ On your **operator machine**:
 | `-l` | `0.0.0.0:31747` | Agents connect here (reverse / control) |
 | `-admin` | `127.0.0.1:31891` | Web UI — **loopback only** |
 | `-p` | (none) | Optional UI password |
+| `-data` | `finalcat-data` | Route catalog persistence (auto-restore after agent reconnect) |
 
 Open the UI: **http://127.0.0.1:31891**
 
@@ -154,7 +155,19 @@ Plain SOCKS5 (no TLS, no auth).
 
 ### Close a route
 
-Use **Close** on a row in **Live lines** or **Not live**, or wait until the agent goes offline.
+Use **Close** on a row in **Live lines** or **Not live**. That removes the route from the server catalog permanently.
+
+### Agent disconnect and restore
+
+Each agent sends a stable **`persistent_id`** (stored in `~/.finalcat/agent.id` or `%APPDATA%\FinalCat\agent.id`). The server saves desired routes in **`<data>/route-catalog.json`**.
+
+| Event | Behavior |
+|-------|----------|
+| Agent goes offline (network blip or dead) | Live tunnels are torn down immediately; desired routes stay in the catalog |
+| Agent reconnects (same `persistent_id`) | Server re-sends open commands for all catalog routes |
+| Operator **Close** | Route removed from catalog and agent |
+
+Legacy agents without `persistent_id` use a server-side fingerprint (`hostname` + OS + local IPs).
 
 ### Multi-hop
 

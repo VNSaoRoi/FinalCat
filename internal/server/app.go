@@ -4,6 +4,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"path/filepath"
 
 	"github.com/gorilla/websocket"
 )
@@ -19,9 +20,14 @@ type App struct {
 	adminListen   string
 }
 
-func NewApp(controlListen, adminListen, password string) *App {
+func NewApp(controlListen, adminListen, password, dataDir string) *App {
 	reg := NewRegistry()
-	hub := NewHub(reg)
+	catalogPath := filepath.Join(dataDir, "route-catalog.json")
+	catalog, err := LoadRouteCatalog(catalogPath)
+	if err != nil {
+		log.Fatalf("route catalog: %v", err)
+	}
+	hub := NewHub(reg, catalog)
 	app := &App{
 		hub:           hub,
 		auth:          NewSessionAuth(password),

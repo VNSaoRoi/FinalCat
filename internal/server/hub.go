@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,15 +50,23 @@ type Hub struct {
 	uib    chan []byte
 }
 
-func NewHub(reg *Registry) *Hub {
+func NewHub(reg *Registry, catalog *RouteCatalog) *Hub {
 	h := &Hub{
 		reg:    reg,
 		agents: make(map[string]*agentSession),
 		ui:     make(map[*websocket.Conn]struct{}),
 		uib:    make(chan []byte, 8),
 	}
-	h.routes = NewRouteManager(h)
+	h.routes = NewRouteManager(h, catalog)
 	return h
+}
+
+func (h *Hub) PersistentIDFor(agentID string) string {
+	c, ok := h.reg.Get(agentID)
+	if !ok {
+		return ""
+	}
+	return c.PersistentID
 }
 
 func (h *Hub) notifyUI() {
@@ -121,8 +130,16 @@ func (h *Hub) notePong(s *agentSession, seq int64) {
 	}
 }
 
+func resolvePersistentID(reg *protocol.Register) string {
+	if id := strings.TrimSpace(reg.PersistentID); id != "" {
+		return id
+	}
+	return DerivePersistentID(reg.Hostname, reg.OS, reg.GOArch, reg.OSUser, reg.LocalIPs)
+}
+
 func recordFromRegister(reg *protocol.Register, remoteAddr string) *ClientRecord {
 	rec := &ClientRecord{
+		PersistentID:       resolvePersistentID(reg),
 		Hostname:           reg.Hostname,
 		OS:                 reg.OS,
 		GOArch:             reg.GOArch,
@@ -161,6 +178,11 @@ func (h *Hub) startAgentSession(conn *websocket.Conn, reg *protocol.Register, re
 	}
 	h.agents[id] = s
 	h.mu.Unlock()
+
+	if snap.PersistentID != "" {
+		h.routes.OnAgentConnected(id, snap.PersistentID, snap.Hostname, snap.OSUser)
+	}
+
 	h.notifyUI()
 
 	go h.runAgentLoop(s)
