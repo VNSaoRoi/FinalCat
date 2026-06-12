@@ -14,9 +14,12 @@ const (
 	TypeRouteTunnelOpen  = "route_tunnel_open"
 	TypeRouteTunnelAck   = "route_tunnel_ack"
 	TypeRouteTunnelClose = "route_tunnel_close"
-	TypeRelayOpen        = "relay_open"
-	TypeRelayClose       = "relay_close"
-	TypeRelayEvent       = "relay_event"
+	TypeRelayOpen              = "relay_open"
+	TypeRelayClose             = "relay_close"
+	TypeRelayEvent             = "relay_event"
+	TypeRouteOpenForwardSmart  = "route_open_forward_smart"
+	TypeForwardTunnelConnect   = "forward_tunnel_connect"
+	TypeForwardTunnelReady     = "forward_tunnel_ready"
 
 	AgentModeReverse = "reverse"
 	AgentModeBind    = "bind"
@@ -24,7 +27,8 @@ const (
 
 	RouteKindSocks       = "socks"
 	RouteKindSocksServer = "socks_server"
-	RouteKindForward     = "forward"
+	RouteKindForward      = "forward"
+	RouteKindForwardSmart = "forward_smart"
 	RouteStatePending = "pending"
 	RouteStateActive  = "active"
 	RouteStateClosed  = "closed"
@@ -158,4 +162,24 @@ type RelayEvent struct {
 	ListenAddr string `json:"listen_addr,omitempty"`
 	TargetAddr string `json:"target_addr,omitempty"`
 	Message    string `json:"message,omitempty"`
+}
+
+type RouteOpenForwardSmart struct {
+	Type       string `json:"type"`
+	RouteID    string `json:"route_id"`
+	ListenAddr string `json:"listen_addr"`
+}
+
+type ForwardTunnelConnect struct {
+	Type     string `json:"type"`
+	RouteID  string `json:"route_id"`
+	TunnelID string `json:"tunnel_id"`
+}
+
+type ForwardTunnelReady struct {
+	Type     string `json:"type"`
+	RouteID  string `json:"route_id"`
+	TunnelID string `json:"tunnel_id"`
+	OK       bool   `json:"ok"`
+	Message  string `json:"message,omitempty"`
 }

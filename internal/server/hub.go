@@ -326,6 +326,11 @@ func (h *Hub) runAgentLoop(s *agentSession) {
 				h.relays.HandleEvent(id, &ev)
 				h.notifyUI()
 			}
+		case protocol.TypeForwardTunnelConnect:
+			var msg protocol.ForwardTunnelConnect
+			if json.Unmarshal(data, &msg) == nil {
+				h.routes.HandleForwardTunnelConnect(id, &msg)
+			}
 		}
 	}
 }

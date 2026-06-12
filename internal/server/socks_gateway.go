@@ -26,10 +26,12 @@ type tunnelAckResult struct {
 }
 
 type activeTunnel struct {
-	agentID  string
-	routeID  string
-	client   net.Conn
-	tunnelID string
+	egressAgentID string
+	listenAgentID string
+	routeID       string
+	client        net.Conn
+	tunnelID      string
+	tunnelKey     protocol.TunnelKey
 }
 
 func (rm *RouteManager) OpenSocksServer(agentID, bindAddr string) (*RouteRecord, error) {
@@ -147,7 +149,7 @@ func (rm *RouteManager) handleSocksClient(ctx context.Context, routeID, agentID 
 
 	rm.mu.Lock()
 	rm.tunnels[tunnelHex] = &activeTunnel{
-		agentID: agentID, routeID: routeID, client: c, tunnelID: tunnelHex,
+		egressAgentID: agentID, routeID: routeID, client: c, tunnelID: tunnelHex, tunnelKey: key,
 	}
 	rm.mu.Unlock()
 
@@ -206,16 +208,26 @@ func (rm *RouteManager) HandleTunnelBinary(agentID string, data []byte) {
 	rm.mu.RLock()
 	t, ok := rm.tunnels[id]
 	rm.mu.RUnlock()
-	if !ok || t.agentID != agentID || t.client == nil {
+	if !ok || len(payload) == 0 {
 		return
 	}
-	if len(payload) == 0 {
+	if t.egressAgentID == agentID {
+		if t.listenAgentID != "" {
+			_ = rm.hub.SendAgentBinary(t.listenAgentID, data)
+			return
+		}
+		if t.client != nil {
+			_, _ = t.client.Write(payload)
+		}
 		return
 	}
-	_, _ = t.client.Write(payload)
+	if t.listenAgentID == agentID && t.egressAgentID != "" {
+		frame := protocol.WrapTunnelFrame(t.tunnelKey, payload)
+		_ = rm.hub.SendAgentBinary(t.egressAgentID, frame)
+	}
 }
 
-func (rm *RouteManager) closeAgentTunnel(agentID, routeID, tunnelID string) {
+func (rm *RouteManager) closeAgentTunnel(egressAgentID, routeID, tunnelID string) {
 	rm.mu.Lock()
 	t, ok := rm.tunnels[tunnelID]
 	if ok {
@@ -225,7 +237,12 @@ func (rm *RouteManager) closeAgentTunnel(agentID, routeID, tunnelID string) {
 	if ok && t.client != nil {
 		_ = t.client.Close()
 	}
-	rm.hub.SendAgent(agentID, protocol.RouteTunnelClose{
+	if ok && t.listenAgentID != "" {
+		rm.hub.SendAgent(t.listenAgentID, protocol.RouteTunnelClose{
+			Type: protocol.TypeRouteTunnelClose, RouteID: routeID, TunnelID: tunnelID,
+		})
+	}
+	rm.hub.SendAgent(egressAgentID, protocol.RouteTunnelClose{
 		Type: protocol.TypeRouteTunnelClose, RouteID: routeID, TunnelID: tunnelID,
 	})
 }

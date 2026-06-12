@@ -71,10 +71,12 @@ func (s *App) handleRouteOpenForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		AgentID    string `json:"agent_id"`
-		ListenAddr string `json:"listen_addr"`
-		TargetHost string `json:"target_host"`
-		TargetPort int    `json:"target_port"`
+		AgentID       string `json:"agent_id"`
+		EgressAgentID string `json:"egress_agent_id"`
+		ListenAddr    string `json:"listen_addr"`
+		TargetHost    string `json:"target_host"`
+		TargetPort    int    `json:"target_port"`
+		Mode          string `json:"mode"` // smart (default) | direct
 	}
 	if json.NewDecoder(r.Body).Decode(&body) != nil || body.AgentID == "" {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -83,7 +85,22 @@ func (s *App) handleRouteOpenForward(w http.ResponseWriter, r *http.Request) {
 	if body.ListenAddr == "" {
 		body.ListenAddr = "0.0.0.0:4444"
 	}
-	rec, err := s.hub.routes.OpenForward(body.AgentID, body.ListenAddr, body.TargetHost, body.TargetPort)
+	mode := strings.ToLower(strings.TrimSpace(body.Mode))
+	if mode == "" {
+		mode = "smart"
+	}
+	var rec *RouteRecord
+	var err error
+	switch mode {
+	case "direct":
+		rec, err = s.hub.routes.OpenForward(body.AgentID, body.ListenAddr, body.TargetHost, body.TargetPort)
+	default:
+		egress := strings.TrimSpace(body.EgressAgentID)
+		if egress == "" {
+			egress = body.AgentID
+		}
+		rec, err = s.hub.routes.OpenForwardSmart(body.AgentID, egress, body.ListenAddr, body.TargetHost, body.TargetPort)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

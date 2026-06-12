@@ -147,7 +147,7 @@
       if (!state.routeForm) {
         state.routeForm = {
           socks: { agent_id: '', bind_on: 'agent', bind_addr: '0.0.0.0:1080', ip_pick: '' },
-          forward: { agent_id: '', listen_addr: '0.0.0.0:4444', target_host: '', target_port: '3389', ip_pick: '', target_pick_source: '', target_ip_pick: '', target_pick_open: false },
+          forward: { agent_id: '', egress_agent_id: '', listen_addr: '0.0.0.0:4444', target_host: '', target_port: '3389', ip_pick: '', target_pick_source: '', target_ip_pick: '', target_pick_open: false },
         };
       }
       return state.routeForm;
@@ -167,6 +167,7 @@
         bucket.ip_pick = String(fd.get('ip_pick') || '');
       } else {
         bucket.agent_id = String(fd.get('agent_id') || bucket.agent_id);
+        bucket.egress_agent_id = String(fd.get('egress_agent_id') || bucket.egress_agent_id);
         bucket.listen_addr = String(fd.get('listen_addr') ?? bucket.listen_addr);
         bucket.target_host = String(fd.get('target_host') ?? bucket.target_host);
         bucket.target_port = String(fd.get('target_port') ?? bucket.target_port);
@@ -665,12 +666,25 @@
         '<button type="submit" class="btn">Open SOCKS</button><p id="socksMsg" class="form-msg"></p></form>';
     }
 
+    function inferEgressAgentId(listenId, targetHost, targetPickSource) {
+      if (targetPickSource && targetPickSource !== GRAPH_OP) return targetPickSource;
+      const host = String(targetHost || '').trim();
+      if (host) {
+        const hit = (state.clients || []).find(c => c.Online && collectAgentIPs(c).includes(host));
+        if (hit) return hit.ID;
+      }
+      return listenId;
+    }
+
     function forwardFormHtml(rf, agents) {
       const targetSrc = rf.forward.target_pick_source || '';
       const targetPickOpen = !!rf.forward.target_pick_open;
+      const egressId = rf.forward.egress_agent_id || inferEgressAgentId(rf.forward.agent_id, rf.forward.target_host, targetSrc);
       return '<form id="forwardForm">' +
-        '<label class="field">Agent<select name="agent_id" id="forwardAgentSel" required>' + agentSelectOptions(agents, rf.forward.agent_id) + '</select></label>' +
-        '<label class="field">Agent IP<select name="ip_pick" id="forwardIpPick">' + buildIpPickOptions(rf.forward.agent_id, rf.forward.ip_pick, true) + '</select></label>' +
+        '<p class="muted" style="margin:0 0 0.65rem;font-size:0.8rem">Smart forward (default): listen on one agent, dial target via egress agent — works across network layers.</p>' +
+        '<label class="field">Listen agent<select name="agent_id" id="forwardAgentSel" required>' + agentSelectOptions(agents, rf.forward.agent_id) + '</select></label>' +
+        '<label class="field">Egress agent (dials target)<select name="egress_agent_id" id="forwardEgressSel">' + agentSelectOptions(agents, egressId) + '</select></label>' +
+        '<label class="field">Listen IP<select name="ip_pick" id="forwardIpPick">' + buildIpPickOptions(rf.forward.agent_id, rf.forward.ip_pick, true) + '</select></label>' +
         '<label class="field">Listen addr<input name="listen_addr" id="forwardListenAddr" value="' + esc(rf.forward.listen_addr) + '" placeholder="0.0.0.0:4444" /></label>' +
         '<div class="row2"><label class="field">Target host' +
         '<div class="input-with-btn"><input name="target_host" id="forwardTargetHost" value="' + esc(rf.forward.target_host) + '" placeholder="10.0.0.5" required />' +
@@ -680,7 +694,11 @@
         '<label class="field">Target<select id="forwardTargetAgentSel">' + buildTargetPickAgentOptions(agents, targetSrc) + '</select></label>' +
         '<label class="field">IP<select id="forwardTargetIpPick">' + buildTargetIpPickOptions(targetSrc, rf.forward.target_ip_pick) + '</select></label>' +
         '</div>' +
-        '<button type="submit" class="btn">Open forward</button><p id="forwardMsg" class="form-msg"></p></form>';
+        '<button type="submit" class="btn">Open forward</button>' +
+        '<details style="margin-top:0.5rem"><summary class="muted" style="font-size:0.78rem">Advanced</summary>' +
+        '<label class="field" style="margin-top:0.35rem">Mode<select name="forward_mode"><option value="smart" selected>smart (tunnel via egress)</option>' +
+        '<option value="direct">direct (listen agent dials target)</option></select></label></details>' +
+        '<p id="forwardMsg" class="form-msg"></p></form>';
     }
 
     function wireSocksForm(rf) {
@@ -802,6 +820,19 @@
           const ip = forwardTargetIpPick.value;
           if (!ip || ip === '0.0.0.0') return;
           forwardTargetHost.value = ip;
+          const egressSel = document.getElementById('forwardEgressSel');
+          if (egressSel && forwardTargetAgentSel?.value && forwardTargetAgentSel.value !== GRAPH_OP) {
+            egressSel.value = forwardTargetAgentSel.value;
+          }
+          saveRouteFormFromDOM('forward');
+        });
+      }
+      if (forwardTargetAgentSel) {
+        forwardTargetAgentSel.addEventListener('change', () => {
+          const egressSel = document.getElementById('forwardEgressSel');
+          if (egressSel && forwardTargetAgentSel.value && forwardTargetAgentSel.value !== GRAPH_OP) {
+            egressSel.value = forwardTargetAgentSel.value;
+          }
           saveRouteFormFromDOM('forward');
         });
       }
@@ -814,13 +845,18 @@
         const msg = document.getElementById('forwardMsg');
         msg.className = 'form-msg';
         try {
+          const listenId = String(fd.get('agent_id') || '');
+          const egressId = String(fd.get('egress_agent_id') || '') ||
+            inferEgressAgentId(listenId, fd.get('target_host'), rf.forward.target_pick_source);
           const res = await apiFetch('/api/routes/forward', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              agent_id: fd.get('agent_id'),
+              agent_id: listenId,
+              egress_agent_id: egressId,
               listen_addr: fd.get('listen_addr'),
               target_host: fd.get('target_host'),
               target_port: parseInt(fd.get('target_port') || '0', 10),
+              mode: fd.get('forward_mode') || 'smart',
             }),
           });
           const t = await res.text();
@@ -858,6 +894,11 @@
         }
         const tIp = document.getElementById('forwardTargetIpPick');
         if (tIp && tSel) tIp.innerHTML = buildTargetIpPickOptions(tSel.value, tIp.value || rf.forward.target_ip_pick);
+        const eSel = document.getElementById('forwardEgressSel');
+        if (eSel) {
+          const curE = eSel.value || rf.forward.egress_agent_id || inferEgressAgentId(sel.value, rf.forward.target_host, rf.forward.target_pick_source);
+          eSel.innerHTML = agentSelectOptions(agents, curE);
+        }
       }
     }
 

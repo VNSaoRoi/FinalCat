@@ -113,6 +113,9 @@ func serveInboundControl(ctx context.Context, conn *websocket.Conn, cfg Config, 
 	relay := newRelayManager(ctx, ws, ack.ClientID)
 	defer relay.closeAll()
 
+	forwardSmart := newForwardSmartManager(ctx, ws, ack.ClientID)
+	defer forwardSmart.closeAll()
+
 	done := make(chan struct{})
 	defer close(done)
 	go heartbeatLoop(ws, ack.ClientID, osUser, done)
@@ -129,6 +132,7 @@ func serveInboundControl(ctx context.Context, conn *websocket.Conn, cfg Config, 
 			return err
 		}
 		if msgType == websocket.BinaryMessage {
+			forwardSmart.handleBinary(data)
 			tunnels.handleBinary(data)
 			continue
 		}
@@ -156,6 +160,9 @@ func serveInboundControl(ctx context.Context, conn *websocket.Conn, cfg Config, 
 			return ErrReconnect
 		default:
 			if relay.handle(data) {
+				continue
+			}
+			if forwardSmart.handle(data) {
 				continue
 			}
 			if routes.handle(data) {

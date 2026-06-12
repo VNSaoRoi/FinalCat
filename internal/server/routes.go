@@ -13,38 +13,41 @@ import (
 )
 
 type RouteRecord struct {
-	ID          string    `json:"id"`
-	AgentID     string    `json:"agent_id"`
-	AgentHost   string    `json:"agent_hostname,omitempty"`
-	Kind        string    `json:"kind"`
-	ListenAddr  string    `json:"listen_addr"`
-	Target      string    `json:"target,omitempty"`
-	State       string    `json:"state"`
-	Message     string    `json:"message,omitempty"`
-	BindOn      string    `json:"bind_on,omitempty"` // agent | server
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	AgentID       string    `json:"agent_id"`
+	EgressAgentID string    `json:"egress_agent_id,omitempty"`
+	AgentHost     string    `json:"agent_hostname,omitempty"`
+	Kind          string    `json:"kind"`
+	ListenAddr    string    `json:"listen_addr"`
+	Target        string    `json:"target,omitempty"`
+	State         string    `json:"state"`
+	Message       string    `json:"message,omitempty"`
+	BindOn        string    `json:"bind_on,omitempty"` // agent | server
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type RouteManager struct {
-	mu         sync.RWMutex
-	routes     map[string]*RouteRecord
-	socksSrv   map[string]*socksServerRoute
-	tunnels    map[string]*activeTunnel
-	tunnelWait map[string]*tunnelWaiter
-	tunnelMu   sync.Mutex
-	hub        *Hub
-	catalog    *RouteCatalog
+	mu          sync.RWMutex
+	routes      map[string]*RouteRecord
+	smartRoutes map[string]*smartRouteMeta
+	socksSrv    map[string]*socksServerRoute
+	tunnels     map[string]*activeTunnel
+	tunnelWait  map[string]*tunnelWaiter
+	tunnelMu    sync.Mutex
+	hub         *Hub
+	catalog     *RouteCatalog
 }
 
 func NewRouteManager(hub *Hub, catalog *RouteCatalog) *RouteManager {
 	return &RouteManager{
-		routes:     make(map[string]*RouteRecord),
-		socksSrv:   make(map[string]*socksServerRoute),
-		tunnels:    make(map[string]*activeTunnel),
-		tunnelWait: make(map[string]*tunnelWaiter),
-		hub:        hub,
-		catalog:    catalog,
+		routes:      make(map[string]*RouteRecord),
+		smartRoutes: make(map[string]*smartRouteMeta),
+		socksSrv:    make(map[string]*socksServerRoute),
+		tunnels:     make(map[string]*activeTunnel),
+		tunnelWait:  make(map[string]*tunnelWaiter),
+		hub:         hub,
+		catalog:     catalog,
 	}
 }
 
@@ -197,6 +200,12 @@ func (rm *RouteManager) Close(id string) error {
 		rm.unpersistRoute(rec.AgentID, id)
 		return nil
 	}
+	if rec.Kind == protocol.RouteKindForwardSmart {
+		rm.closeSmartTunnelsForRoute(id)
+		rm.mu.Lock()
+		delete(rm.smartRoutes, id)
+		rm.mu.Unlock()
+	}
 	if rm.hub.AgentOnline(rec.AgentID) {
 		rm.hub.SendAgent(rec.AgentID, protocol.RouteClose{
 			Type: protocol.TypeRouteClose, RouteID: id,
@@ -290,6 +299,7 @@ func (rm *RouteManager) AgentDisconnected(agentID string) {
 	for id, r := range rm.routes {
 		if r.AgentID == agentID {
 			delete(rm.routes, id)
+			delete(rm.smartRoutes, id)
 		}
 	}
 	rm.mu.Unlock()
@@ -338,6 +348,20 @@ func (rm *RouteManager) restoreOne(agentID string, dr DesiredRoute) {
 			return
 		}
 		_, err = rm.openForward(agentID, dr.ID, dr.ListenAddr, host, port)
+	case protocol.RouteKindForwardSmart:
+		host, port := dr.TargetHost, dr.TargetPort
+		if host == "" && dr.Target != "" {
+			host, port = splitTargetHostPort(dr.Target)
+		}
+		if host == "" || port <= 0 {
+			log.Printf("route restore skip id=%s: bad target", dr.ID)
+			return
+		}
+		egress := dr.EgressAgentID
+		if egress == "" {
+			egress = agentID
+		}
+		_, err = rm.openForwardSmart(agentID, egress, dr.ID, dr.ListenAddr, host, port)
 	default:
 		return
 	}

@@ -16,13 +16,14 @@ import (
 
 // DesiredRoute is persisted operator intent — restored after agent reconnect.
 type DesiredRoute struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
-	ListenAddr string `json:"listen_addr"`
-	Target     string `json:"target,omitempty"`
-	TargetHost string `json:"target_host,omitempty"`
-	TargetPort int    `json:"target_port,omitempty"`
-	BindOn     string `json:"bind_on,omitempty"`
+	ID            string `json:"id"`
+	Kind          string `json:"kind"`
+	ListenAddr    string `json:"listen_addr"`
+	Target        string `json:"target,omitempty"`
+	TargetHost    string `json:"target_host,omitempty"`
+	TargetPort    int    `json:"target_port,omitempty"`
+	EgressAgentID string `json:"egress_agent_id,omitempty"`
+	BindOn        string `json:"bind_on,omitempty"`
 }
 
 type CatalogAgent struct {
@@ -163,13 +164,14 @@ func (c *RouteCatalog) Routes(pid string) []DesiredRoute {
 
 func desiredFromRecord(rec *RouteRecord) DesiredRoute {
 	dr := DesiredRoute{
-		ID:         rec.ID,
-		Kind:       rec.Kind,
-		ListenAddr: rec.ListenAddr,
-		Target:     rec.Target,
-		BindOn:     rec.BindOn,
+		ID:            rec.ID,
+		Kind:          rec.Kind,
+		ListenAddr:    rec.ListenAddr,
+		Target:        rec.Target,
+		EgressAgentID: rec.EgressAgentID,
+		BindOn:        rec.BindOn,
 	}
-	if rec.Kind == protocol.RouteKindForward && rec.Target != "" {
+	if (rec.Kind == protocol.RouteKindForward || rec.Kind == protocol.RouteKindForwardSmart) && rec.Target != "" {
 		host, port := splitTargetHostPort(rec.Target)
 		dr.TargetHost = host
 		dr.TargetPort = port
