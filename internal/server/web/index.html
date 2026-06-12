@@ -39,6 +39,10 @@
     .field input, .field select, .field textarea { width: 100%; margin-top: 0.25rem; padding: 0.45rem 0.55rem; border-radius: 6px; border: 1px solid var(--border); background: #0d1117; color: var(--text); }
     .row2 { display: grid; grid-template-columns: 1fr 100px; gap: 0.5rem; }
     .row-ip { display: grid; grid-template-columns: 1fr 1.2fr; gap: 0.5rem; align-items: end; }
+    .input-with-btn { display: grid; grid-template-columns: 1fr auto; gap: 0.35rem; margin-top: 0.25rem; align-items: stretch; }
+    .input-with-btn input { margin-top: 0; }
+    .btn-pick { padding: 0.45rem 0.6rem; font-size: 0.78rem; min-width: auto; white-space: nowrap; }
+    .target-pick-panel { padding: 0.55rem 0.65rem; margin: -0.25rem 0 0.65rem; border: 1px dashed var(--border); border-radius: 6px; background: #0d1117; }
     .btn { background: var(--accent); color: #0d1117; border: none; padding: 0.45rem 0.85rem; border-radius: 6px; cursor: pointer; font-weight: 600; }
     .btn.secondary { background: #21262d; color: var(--text); }
     .form-msg { font-size: 0.82rem; margin-top: 0.5rem; }
@@ -69,6 +73,14 @@
     .modal-head h3 { margin: 0; font-size: 1rem; }
     .modal-close { background: none; border: none; color: var(--muted); font-size: 1.4rem; cursor: pointer; padding: 0 0.2rem; line-height: 1; }
     .modal-close:hover { color: var(--text); }
+    .badge.relay { background: rgba(88,166,255,.15); color: var(--accent); }
+    .relay-box { margin-top: 0.65rem; padding: 0.55rem 0.65rem; border-radius: 6px; border: 1px solid rgba(88,166,255,.35); background: rgba(88,166,255,.06); }
+    .relay-box dt { color: var(--accent); }
+    .relay-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.5rem; align-items: center; }
+    .relay-setup-panel { margin-top: 0.55rem; padding: 0.65rem 0.7rem; border: 1px dashed var(--border); border-radius: 6px; background: #0d1117; }
+    .relay-setup-panel .toolbar { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.35rem; }
+    .btn.sm { padding: 0.28rem 0.55rem; font-size: 0.75rem; font-weight: 600; }
+    .agent-card-relay { border-color: rgba(88,166,255,.35); }
   </style>
 </head>
 <body>
@@ -105,7 +117,13 @@
     </div>
   </div>
   <script>
-    const state = { clients: [], routes: [], routeForm: null, routeMounted: false, routeModalOpen: null, currentView: '' };
+    const RELAY_PORT_DEFAULT = 31748;
+    const state = {
+      clients: [], routes: [], controlAdvertise: '',
+      routeForm: null, routeMounted: false, routeModalOpen: null,
+      relaySetupId: null, relaySetupDraft: { ip: '', port: String(RELAY_PORT_DEFAULT) },
+      currentView: '',
+    };
     const GRAPH_OP = '__fc_operator__';
 
     function routeName() {
@@ -129,7 +147,7 @@
       if (!state.routeForm) {
         state.routeForm = {
           socks: { agent_id: '', bind_on: 'agent', bind_addr: '0.0.0.0:1080', ip_pick: '' },
-          forward: { agent_id: '', listen_addr: '0.0.0.0:4444', target_host: '', target_port: '3389', ip_pick: '' },
+          forward: { agent_id: '', listen_addr: '0.0.0.0:4444', target_host: '', target_port: '3389', ip_pick: '', target_pick_source: '', target_ip_pick: '', target_pick_open: false },
         };
       }
       return state.routeForm;
@@ -153,6 +171,12 @@
         bucket.target_host = String(fd.get('target_host') ?? bucket.target_host);
         bucket.target_port = String(fd.get('target_port') ?? bucket.target_port);
         bucket.ip_pick = String(fd.get('ip_pick') || '');
+        const tSrc = document.getElementById('forwardTargetAgentSel');
+        const tIp = document.getElementById('forwardTargetIpPick');
+        if (tSrc) bucket.target_pick_source = String(tSrc.value || bucket.target_pick_source);
+        if (tIp) bucket.target_ip_pick = String(tIp.value || bucket.target_ip_pick);
+        const tPanel = document.getElementById('forwardTargetPickPanel');
+        if (tPanel) bucket.target_pick_open = !tPanel.hidden;
       }
     }
 
@@ -642,12 +666,20 @@
     }
 
     function forwardFormHtml(rf, agents) {
+      const targetSrc = rf.forward.target_pick_source || '';
+      const targetPickOpen = !!rf.forward.target_pick_open;
       return '<form id="forwardForm">' +
         '<label class="field">Agent<select name="agent_id" id="forwardAgentSel" required>' + agentSelectOptions(agents, rf.forward.agent_id) + '</select></label>' +
         '<label class="field">Agent IP<select name="ip_pick" id="forwardIpPick">' + buildIpPickOptions(rf.forward.agent_id, rf.forward.ip_pick, true) + '</select></label>' +
         '<label class="field">Listen addr<input name="listen_addr" id="forwardListenAddr" value="' + esc(rf.forward.listen_addr) + '" placeholder="0.0.0.0:4444" /></label>' +
-        '<div class="row2"><label class="field">Target host<input name="target_host" value="' + esc(rf.forward.target_host) + '" placeholder="10.0.0.5" required /></label>' +
+        '<div class="row2"><label class="field">Target host' +
+        '<div class="input-with-btn"><input name="target_host" id="forwardTargetHost" value="' + esc(rf.forward.target_host) + '" placeholder="10.0.0.5" required />' +
+        '<button type="button" class="btn secondary btn-pick" id="forwardTargetPickBtn" title="Pick IP from agent or operator">Pick</button></div></label>' +
         '<label class="field">Port<input name="target_port" type="number" value="' + esc(rf.forward.target_port) + '" required /></label></div>' +
+        '<div id="forwardTargetPickPanel" class="target-pick-panel"' + (targetPickOpen ? '' : ' hidden') + '>' +
+        '<label class="field">Target<select id="forwardTargetAgentSel">' + buildTargetPickAgentOptions(agents, targetSrc) + '</select></label>' +
+        '<label class="field">IP<select id="forwardTargetIpPick">' + buildTargetIpPickOptions(targetSrc, rf.forward.target_ip_pick) + '</select></label>' +
+        '</div>' +
         '<button type="submit" class="btn">Open forward</button><p id="forwardMsg" class="form-msg"></p></form>';
     }
 
@@ -720,6 +752,11 @@
       const forwardAgentSel = document.getElementById('forwardAgentSel');
       const forwardIpPick = document.getElementById('forwardIpPick');
       const forwardListenAddr = document.getElementById('forwardListenAddr');
+      const forwardTargetHost = document.getElementById('forwardTargetHost');
+      const forwardTargetPickBtn = document.getElementById('forwardTargetPickBtn');
+      const forwardTargetPickPanel = document.getElementById('forwardTargetPickPanel');
+      const forwardTargetAgentSel = document.getElementById('forwardTargetAgentSel');
+      const forwardTargetIpPick = document.getElementById('forwardTargetIpPick');
       const form = document.getElementById('forwardForm');
       if (!form) return;
 
@@ -728,12 +765,43 @@
         forwardIpPick.innerHTML = buildIpPickOptions(forwardAgentSel.value, forwardIpPick.value || rf.forward.ip_pick, true);
       }
 
+      function refreshForwardTargetIpPick() {
+        if (!forwardTargetIpPick || !forwardTargetAgentSel) return;
+        const src = forwardTargetAgentSel.value;
+        forwardTargetIpPick.innerHTML = buildTargetIpPickOptions(src, forwardTargetIpPick.value || rf.forward.target_ip_pick);
+      }
+
       forwardAgentSel.addEventListener('change', () => { rf.forward.ip_pick = ''; refreshForwardIpPick(); saveRouteFormFromDOM('forward'); });
       if (forwardIpPick) {
         forwardIpPick.addEventListener('change', () => {
           const ip = forwardIpPick.value;
           if (!ip) return;
           forwardListenAddr.value = setAddrHost(forwardListenAddr.value, ip, 4444);
+          saveRouteFormFromDOM('forward');
+        });
+      }
+      if (forwardTargetPickBtn && forwardTargetPickPanel) {
+        forwardTargetPickBtn.addEventListener('click', () => {
+          forwardTargetPickPanel.hidden = !forwardTargetPickPanel.hidden;
+          if (!forwardTargetPickPanel.hidden && forwardTargetAgentSel && !forwardTargetAgentSel.value) {
+            forwardTargetAgentSel.value = forwardAgentSel.value || GRAPH_OP;
+            refreshForwardTargetIpPick();
+          }
+          saveRouteFormFromDOM('forward');
+        });
+      }
+      if (forwardTargetAgentSel) {
+        forwardTargetAgentSel.addEventListener('change', () => {
+          rf.forward.target_ip_pick = '';
+          refreshForwardTargetIpPick();
+          saveRouteFormFromDOM('forward');
+        });
+      }
+      if (forwardTargetIpPick && forwardTargetHost) {
+        forwardTargetIpPick.addEventListener('change', () => {
+          const ip = forwardTargetIpPick.value;
+          if (!ip || ip === '0.0.0.0') return;
+          forwardTargetHost.value = ip;
           saveRouteFormFromDOM('forward');
         });
       }
@@ -783,6 +851,13 @@
         sel.innerHTML = agentSelectOptions(agents, cur);
         const ipPick = document.getElementById('forwardIpPick');
         if (ipPick) ipPick.innerHTML = buildIpPickOptions(sel.value, ipPick.value || rf.forward.ip_pick, true);
+        const tSel = document.getElementById('forwardTargetAgentSel');
+        if (tSel) {
+          const curT = tSel.value || rf.forward.target_pick_source;
+          tSel.innerHTML = buildTargetPickAgentOptions(agents, curT);
+        }
+        const tIp = document.getElementById('forwardTargetIpPick');
+        if (tIp && tSel) tIp.innerHTML = buildTargetIpPickOptions(tSel.value, tIp.value || rf.forward.target_ip_pick);
       }
     }
 
@@ -860,6 +935,32 @@
       return html;
     }
 
+    function collectOperatorIPs() {
+      return [...operatorHosts()];
+    }
+
+    function buildTargetPickAgentOptions(agents, selected) {
+      let html = '<option value="">— pick target —</option>';
+      html += '<option value="' + GRAPH_OP + '"' + (selected === GRAPH_OP ? ' selected' : '') + '>Operator server</option>';
+      agents.forEach(c => {
+        const id = c.ID;
+        html += '<option value="' + esc(id) + '"' + (selected === id ? ' selected' : '') + '>' + esc(agentTitle(c)) + '</option>';
+      });
+      return html;
+    }
+
+    function buildTargetIpPickOptions(sourceId, selected) {
+      let html = '<option value="">— pick IP —</option>';
+      if (!sourceId) return html;
+      if (sourceId === GRAPH_OP) {
+        collectOperatorIPs().forEach(ip => {
+          html += '<option value="' + esc(ip) + '"' + (selected === ip ? ' selected' : '') + '>' + esc(ip) + '</option>';
+        });
+        return html;
+      }
+      return buildIpPickOptions(sourceId, selected, false);
+    }
+
     function agentSelectOptions(agents, selectedId) {
       if (!agents.length) return '<option value="">(no online agents)</option>';
       return agents.map(c => {
@@ -893,22 +994,139 @@
       });
     }
 
+    function relayPivotLabel(c) {
+      const rp = c.RelayPivot;
+      if (!rp || !rp.listen_addr) return '—';
+      return rp.active ? '<code>' + esc(rp.listen_addr) + '</code>' : '<span class="muted">' + esc(rp.listen_addr) + ' (offline)</span>';
+    }
+
+    function relayDeployCmd(ep) {
+      return './agent_linux_amd64 -r ' + ep;
+    }
+
+    function copyText(text) {
+      navigator.clipboard?.writeText(text).catch(() => {});
+    }
+
+    function buildRelayIpOptions(ips, selected) {
+      if (!ips.length) return '<option value="">(no IPs)</option>';
+      return ips.map(ip =>
+        '<option value="' + esc(ip) + '"' + (ip === selected ? ' selected' : '') + '>' + esc(ip) + '</option>'
+      ).join('');
+    }
+
+    function relaySection(c) {
+      const id = esc(c.ID);
+      if (!c.Online) return '';
+      const rp = c.RelayPivot;
+      const ctrl = state.controlAdvertise || 'server:31747';
+      if (rp && rp.active && rp.listen_addr) {
+        const ep = rp.listen_addr;
+        return '<div class="relay-box"><dl>' +
+          '<dt>Relay pivot</dt><dd><code>' + esc(ep) + '</code> → <code>' + esc(rp.target || ctrl) + '</code></dd>' +
+          (rp.listen_ip ? '<dt>Listen</dt><dd><code>' + esc(rp.listen_ip) + '</code> : <code>' + esc(String(rp.listen_port || '')) + '</code></dd>' : '') +
+          '</dl><div class="relay-actions">' +
+          '<button type="button" class="btn secondary sm btn-copy-relay" data-text="' + esc(ep) + '">Copy endpoint</button>' +
+          '<button type="button" class="btn secondary sm btn-copy-relay" data-text="' + esc(relayDeployCmd(ep)) + '">Copy -r</button>' +
+          '<button type="button" class="btn secondary sm btn-close-relay" data-id="' + id + '">Close relay</button>' +
+          '</div></div>';
+      }
+      const setupOpen = state.relaySetupId === c.ID;
+      const ips = collectAgentIPs(c);
+      const draftIp = setupOpen ? state.relaySetupDraft.ip : (ips[0] || '');
+      const draftPort = setupOpen ? state.relaySetupDraft.port : String(RELAY_PORT_DEFAULT);
+      const setupPanel = setupOpen
+        ? '<form class="relay-setup-panel" data-id="' + id + '">' +
+          '<div class="row2">' +
+          '<label class="field">Listen IP<select name="listen_ip">' + buildRelayIpOptions(ips, draftIp) + '</select></label>' +
+          '<label class="field">Port<input name="listen_port" type="number" min="1" max="65535" value="' + esc(draftPort) + '" /></label>' +
+          '</div>' +
+          '<p class="muted" style="margin:0 0 0.35rem;font-size:0.78rem">Proxy WS → <code>' + esc(ctrl) + '</code></p>' +
+          '<div class="toolbar">' +
+          '<button type="submit" class="btn sm">Open relay</button>' +
+          '<button type="button" class="btn secondary sm btn-cancel-relay-setup">Cancel</button>' +
+          '</div><p class="form-msg relay-msg"></p></form>'
+        : '';
+      return '<div class="relay-actions" style="margin-top:0.65rem">' +
+        '<button type="button" class="btn sm btn-relay-setup" data-id="' + id + '"' + (setupOpen ? ' disabled' : '') + '>Relay setup</button>' +
+        '</div>' + setupPanel;
+    }
+
+    function attachRelayHandlers() {
+      document.querySelectorAll('.btn-copy-relay').forEach(b => {
+        b.addEventListener('click', () => copyText(b.dataset.text));
+      });
+      document.querySelectorAll('.btn-relay-setup').forEach(b => {
+        b.addEventListener('click', () => {
+          const c = agentById(b.dataset.id);
+          if (!c) return;
+          const ips = collectAgentIPs(c);
+          state.relaySetupId = c.ID;
+          state.relaySetupDraft = { ip: ips[0] || '', port: String(RELAY_PORT_DEFAULT) };
+          renderAgents();
+        });
+      });
+      document.querySelectorAll('.btn-cancel-relay-setup').forEach(b => {
+        b.addEventListener('click', () => { state.relaySetupId = null; renderAgents(); });
+      });
+      document.querySelectorAll('.relay-setup-panel').forEach(form => {
+        form.addEventListener('submit', async ev => {
+          ev.preventDefault();
+          const id = form.dataset.id;
+          const fd = new FormData(form);
+          const msg = form.querySelector('.relay-msg');
+          if (msg) { msg.className = 'form-msg'; msg.textContent = ''; }
+          try {
+            const res = await apiFetch('/api/clients/' + encodeURIComponent(id) + '/relay', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                listen_ip: fd.get('listen_ip'),
+                listen_port: parseInt(fd.get('listen_port') || String(RELAY_PORT_DEFAULT), 10),
+              }),
+            });
+            const t = await res.text();
+            if (!res.ok) throw new Error(t || res.statusText);
+            state.relaySetupId = null;
+          } catch (e) {
+            if (msg) { msg.classList.add('err'); msg.textContent = e.message; }
+            return;
+          }
+          renderAgents();
+        });
+        form.querySelector('[name="listen_ip"]')?.addEventListener('change', e => { state.relaySetupDraft.ip = e.target.value; });
+        form.querySelector('[name="listen_port"]')?.addEventListener('input', e => { state.relaySetupDraft.port = e.target.value; });
+      });
+      document.querySelectorAll('.btn-close-relay').forEach(b => {
+        b.addEventListener('click', async () => {
+          const id = b.dataset.id;
+          try {
+            const res = await apiFetch('/api/clients/' + encodeURIComponent(id) + '/relay', { method: 'DELETE' });
+            if (!res.ok) throw new Error(await res.text());
+            state.relaySetupId = null;
+          } catch (e) { alert(e.message); }
+        });
+      });
+    }
+
     function renderDashboard() {
       const list = state.clients || [];
       const online = list.filter(c => c.Online).length;
+      const relays = list.filter(c => c.RelayPivot && c.RelayPivot.active).length;
       const rows = list.length ? list.map(c =>
         '<tr><td>' + esc(agentTitle(c)) + '</td><td>' + esc(c.OS||'—') + '</td><td>' +
         (c.Online ? '<span class="badge on">Online</span>' : '<span class="badge off">Offline</span>') +
-        '</td><td>' + esc(c.ActiveUpstreamUsed||'—') + '</td><td>' + fmtTime(c.LastSeen) + '</td></tr>'
-      ).join('') : '<tr><td colspan="5" class="muted">No agents yet.</td></tr>';
+        '</td><td><code>' + esc(c.ActiveUpstreamUsed||'—') + '</code></td><td>' + relayPivotLabel(c) +
+        '</td><td>' + fmtTime(c.LastSeen) + '</td></tr>'
+      ).join('') : '<tr><td colspan="6" class="muted">No agents yet.</td></tr>';
       document.getElementById('view').innerHTML =
         '<h2>Dashboard</h2>' +
         '<div class="stat-row">' +
         '<div class="stat"><div class="n">' + list.length + '</div><div class="l">Total</div></div>' +
         '<div class="stat"><div class="n">' + online + '</div><div class="l">Online</div></div>' +
+        '<div class="stat"><div class="n">' + relays + '</div><div class="l">Relay pivot</div></div>' +
         '<div class="stat"><div class="n">' + (list.length - online) + '</div><div class="l">Offline</div></div>' +
         '</div>' +
-        '<div class="card"><table class="data"><thead><tr><th>Agent</th><th>OS</th><th>State</th><th>Upstream</th><th>Last seen</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+        '<div class="card"><table class="data"><thead><tr><th>Agent</th><th>OS</th><th>State</th><th>Upstream</th><th>Relay pivot</th><th>Last seen</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
     }
 
     function listenerChips(listeners) {
@@ -918,7 +1136,7 @@
 
     function localIPsDisplay(ips) {
       if (!Array.isArray(ips) || !ips.length) return '—';
-      return ips.map(ip => '<code>' + esc(ip) + '</code>').join(' ');
+      return ips.map(ip => '<code>' + esc(ip) + '</code>').join('<br>');
     }
 
     function renderAgents() {
@@ -936,19 +1154,22 @@
         attachBindForm();
         return;
       }
-      document.getElementById('view').innerHTML = '<h2>Agents</h2>' + bindCard + '<div class="grid">' + list.map(c => {
+      const relayHint = '<p class="muted" style="margin-bottom:1rem">Use <strong>Relay setup</strong> on a hop agent — pick listen IP and port (default <code>' + RELAY_PORT_DEFAULT + '</code>) — then copy <code>IP:port</code> for the next agent <code>-r</code>.</p>';
+      document.getElementById('view').innerHTML = '<h2>Agents</h2>' + relayHint + bindCard + '<div class="grid">' + list.map(c => {
         const id = esc(c.ID);
         const ups = (c.UpstreamEndpoints || []).join('\n');
         const badge = c.Online ? 'on">Online' : 'off">Offline';
-        return '<article class="card"><div class="card-head"><h3 class="hostname">' + esc(agentTitle(c)) +
+        const relayBadge = (c.RelayPivot && c.RelayPivot.active) ? ' <span class="badge relay">relay</span>' : '';
+        return '<article class="card' + ((c.RelayPivot && c.RelayPivot.active) ? ' agent-card-relay' : '') + '"><div class="card-head"><h3 class="hostname">' + esc(agentTitle(c)) + relayBadge +
           '</h3><span class="badge ' + badge + '</span></div>' +
           '<dl><dt>Mode</dt><dd>' + esc(c.AgentMode||'reverse') + '</dd>' +
           '<dt>OS</dt><dd>' + esc(c.OS||'—') + '</dd><dt>Client ID</dt><dd style="word-break:break-all">' + id + '</dd>' +
           '<dt>Remote</dt><dd>' + esc(c.RemoteAddr||'—') + '</dd>' +
           '<dt>Local IPs</dt><dd style="line-height:1.6">' + localIPsDisplay(c.LocalIPs) + '</dd>' +
-          '<dt>Active upstream</dt><dd>' + esc(c.ActiveUpstreamUsed||'—') + '</dd>' +
+          '<dt>Active upstream</dt><dd><code>' + esc(c.ActiveUpstreamUsed||'—') + '</code></dd>' +
           '<dt>Listeners</dt><dd>' + listenerChips(c.Listeners) + '</dd>' +
           '<dt>Last seen</dt><dd>' + fmtTime(c.LastSeen) + '</dd></dl>' +
+          relaySection(c) +
           (c.Online
             ? '<details style="margin-top:0.75rem"><summary>Edit upstreams (failover)</summary>' +
               '<form class="upstream-form" data-id="' + id + '"><textarea rows="3" style="width:100%;margin:0.5rem 0">' + esc(ups) + '</textarea>' +
@@ -957,6 +1178,7 @@
           '</article>';
       }).join('') + '</div>';
       attachBindForm();
+      attachRelayHandlers();
       document.querySelectorAll('.upstream-form').forEach(f => {
         f.addEventListener('submit', async ev => {
           ev.preventDefault();
@@ -1057,9 +1279,12 @@
           } else {
             state.clients = data.clients || [];
             state.routes = data.routes || [];
+            if (data.control_advertise) state.controlAdvertise = data.control_advertise;
           }
           if (routeName() === 'route') {
             paintRoute();
+          } else if (routeName() === 'agents' && state.relaySetupId) {
+            renderAgents();
           } else {
             paint();
           }

@@ -72,11 +72,20 @@ func (s *App) handleClients(w http.ResponseWriter, r *http.Request) {
 func (s *App) handleClientSub(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/clients/")
 	parts := strings.Split(path, "/")
-	if len(parts) < 2 || parts[1] != "upstreams" {
+	if len(parts) < 2 {
 		http.NotFound(w, r)
 		return
 	}
 	id := parts[0]
+	switch parts[1] {
+	case "relay":
+		s.handleClientRelay(w, r, id)
+		return
+	case "upstreams":
+	default:
+		http.NotFound(w, r)
+		return
+	}
 	if r.Method != http.MethodPatch {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

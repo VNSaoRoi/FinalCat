@@ -13,7 +13,7 @@ func testRouteManager(t *testing.T) *RouteManager {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub := NewHub(reg, catalog)
+	hub := NewHub(reg, catalog, "127.0.0.1:31747")
 	return hub.routes
 }
 

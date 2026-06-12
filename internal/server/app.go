@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
@@ -20,14 +21,15 @@ type App struct {
 	adminListen   string
 }
 
-func NewApp(controlListen, adminListen, password, dataDir string) *App {
+func NewApp(controlListen, adminListen, password, dataDir, controlAdvertise string) *App {
 	reg := NewRegistry()
 	catalogPath := filepath.Join(dataDir, "route-catalog.json")
 	catalog, err := LoadRouteCatalog(catalogPath)
 	if err != nil {
 		log.Fatalf("route catalog: %v", err)
 	}
-	hub := NewHub(reg, catalog)
+	advertise := resolveControlAdvertise(controlListen, controlAdvertise)
+	hub := NewHub(reg, catalog, advertise)
 	app := &App{
 		hub:           hub,
 		auth:          NewSessionAuth(password),
@@ -96,4 +98,21 @@ func ParseAdminListen(addr string) (string, error) {
 		port = "31891"
 	}
 	return net.JoinHostPort("127.0.0.1", port), nil
+}
+
+func resolveControlAdvertise(controlListen, advertise string) string {
+	if s := strings.TrimSpace(advertise); s != "" {
+		return s
+	}
+	host, port, err := net.SplitHostPort(controlListen)
+	if err != nil {
+		return "127.0.0.1:31747"
+	}
+	if port == "" {
+		port = "31747"
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
 }

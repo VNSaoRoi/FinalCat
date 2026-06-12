@@ -369,15 +369,17 @@ func newRouteID() string {
 }
 
 type UISnapshot struct {
-	Clients []ClientRecord `json:"clients"`
-	Routes  []RouteRecord  `json:"routes"`
+	Clients          []ClientRecord `json:"clients"`
+	Routes           []RouteRecord  `json:"routes"`
+	ControlAdvertise string         `json:"control_advertise,omitempty"`
 }
 
 func (h *Hub) uiSnapshotJSON() ([]byte, error) {
 	h.reg.DedupeAllPersistentIDs()
 	snap := UISnapshot{
-		Clients: h.reg.Snapshot(),
-		Routes:  h.routes.Snapshot(),
+		Clients:          h.reg.Snapshot(),
+		Routes:           h.routes.Snapshot(),
+		ControlAdvertise: h.relays.ControlAdvertise(),
 	}
 	return json.Marshal(snap)
 }

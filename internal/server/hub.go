@@ -43,6 +43,7 @@ type agentSession struct {
 type Hub struct {
 	reg    *Registry
 	routes *RouteManager
+	relays *RelayManager
 
 	mu     sync.RWMutex
 	agents map[string]*agentSession
@@ -50,7 +51,7 @@ type Hub struct {
 	uib    chan []byte
 }
 
-func NewHub(reg *Registry, catalog *RouteCatalog) *Hub {
+func NewHub(reg *Registry, catalog *RouteCatalog, controlAdvertise string) *Hub {
 	h := &Hub{
 		reg:    reg,
 		agents: make(map[string]*agentSession),
@@ -58,6 +59,7 @@ func NewHub(reg *Registry, catalog *RouteCatalog) *Hub {
 		uib:    make(chan []byte, 8),
 	}
 	h.routes = NewRouteManager(h, catalog)
+	h.relays = NewRelayManager(h, controlAdvertise)
 	return h
 }
 
@@ -223,6 +225,7 @@ func (h *Hub) startAgentSession(conn *websocket.Conn, reg *protocol.Register, re
 	if snap.PersistentID != "" {
 		h.routes.OnAgentConnected(id, snap.PersistentID, snap.Hostname, snap.OSUser)
 	}
+	h.relays.OnAgentConnected(id)
 
 	h.notifyUI()
 
@@ -259,6 +262,7 @@ func (h *Hub) runAgentLoop(s *agentSession) {
 		close(s.send)
 		h.reg.SetOffline(id)
 		h.routes.AgentDisconnected(id)
+		h.relays.AgentDisconnected(id)
 		h.notifyUI()
 		_ = s.conn.Close()
 	}()
@@ -315,6 +319,12 @@ func (h *Hub) runAgentLoop(s *agentSession) {
 			var msg protocol.RouteTunnelClose
 			if json.Unmarshal(data, &msg) == nil && msg.TunnelID != "" {
 				h.routes.closeTunnelFromAgent(msg.TunnelID)
+			}
+		case protocol.TypeRelayEvent:
+			var ev protocol.RelayEvent
+			if json.Unmarshal(data, &ev) == nil {
+				h.relays.HandleEvent(id, &ev)
+				h.notifyUI()
 			}
 		}
 	}

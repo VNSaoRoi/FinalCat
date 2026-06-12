@@ -110,6 +110,9 @@ func serveInboundControl(ctx context.Context, conn *websocket.Conn, cfg Config, 
 	routes := newRouteManager(ctx, ws, tunnels, ack.ClientID)
 	defer routes.closeAll()
 
+	relay := newRelayManager(ctx, ws, ack.ClientID)
+	defer relay.closeAll()
+
 	done := make(chan struct{})
 	defer close(done)
 	go heartbeatLoop(ws, ack.ClientID, osUser, done)
@@ -152,6 +155,9 @@ func serveInboundControl(ctx context.Context, conn *websocket.Conn, cfg Config, 
 			log.Printf("upstream update rev=%d: %v", su.Revision, su.Endpoints)
 			return ErrReconnect
 		default:
+			if relay.handle(data) {
+				continue
+			}
 			if routes.handle(data) {
 				continue
 			}

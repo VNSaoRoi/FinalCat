@@ -13,6 +13,14 @@ type ListenerRecord struct {
 	State   string `json:"state,omitempty"`
 }
 
+type RelayPivotRecord struct {
+	Active     bool   `json:"active,omitempty"`
+	ListenIP   string `json:"listen_ip,omitempty"`
+	ListenPort int    `json:"listen_port,omitempty"`
+	ListenAddr string `json:"listen_addr,omitempty"`
+	Target     string `json:"target,omitempty"`
+}
+
 type ClientRecord struct {
 	ID                 string           `json:"ID"`
 	PersistentID       string           `json:"PersistentID,omitempty"`
@@ -30,7 +38,8 @@ type ClientRecord struct {
 	LastSeen           time.Time `json:"LastSeen"`
 	Revision           int64     `json:"Revision"`
 	Online             bool      `json:"Online"`
-	Listening          bool      `json:"Listening,omitempty"`
+	Listening          bool               `json:"Listening,omitempty"`
+	RelayPivot         *RelayPivotRecord  `json:"RelayPivot,omitempty"`
 }
 
 type Registry struct {
@@ -148,9 +157,36 @@ func (r *Registry) SetOffline(id string) {
 	defer r.mu.Unlock()
 	if c, ok := r.clients[id]; ok {
 		c.Online = false
+		if c.RelayPivot != nil {
+			c.RelayPivot.Active = false
+		}
 		c.LastSeen = time.Now().UTC()
 		c.Revision = r.rev.Add(1)
 	}
+}
+
+func (r *Registry) SetRelayPivot(id string, rp *RelayPivotRecord) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.clients[id]
+	if !ok {
+		return
+	}
+	if rp == nil {
+		c.RelayPivot = nil
+	} else {
+		cp := *rp
+		c.RelayPivot = &cp
+	}
+	c.Revision = r.rev.Add(1)
+}
+
+func copyRelayPivot(src *RelayPivotRecord) *RelayPivotRecord {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	return &cp
 }
 
 func (r *Registry) SetUpstream(id string, eps []string) (*ClientRecord, bool) {
@@ -177,6 +213,7 @@ func (r *Registry) Get(id string) (*ClientRecord, bool) {
 	cp.LocalIPs = append([]string(nil), c.LocalIPs...)
 	cp.Listeners = append([]ListenerRecord(nil), c.Listeners...)
 	cp.UpstreamEndpoints = append([]string(nil), c.UpstreamEndpoints...)
+	cp.RelayPivot = copyRelayPivot(c.RelayPivot)
 	return &cp, true
 }
 
@@ -225,6 +262,7 @@ func (r *Registry) Snapshot() []ClientRecord {
 		cp.LocalIPs = append([]string(nil), c.LocalIPs...)
 		cp.Listeners = append([]ListenerRecord(nil), c.Listeners...)
 		cp.UpstreamEndpoints = append([]string(nil), c.UpstreamEndpoints...)
+		cp.RelayPivot = copyRelayPivot(c.RelayPivot)
 		out = append(out, cp)
 	}
 	return out

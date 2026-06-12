@@ -55,7 +55,7 @@ func TestDedupeAllPersistentIDs(t *testing.T) {
 func TestReconnectReusesClientID(t *testing.T) {
 	reg := NewRegistry()
 	catalog, _ := LoadRouteCatalog(t.TempDir() + "/cat.json")
-	hub := NewHub(reg, catalog)
+	hub := NewHub(reg, catalog, "127.0.0.1:31747")
 
 	pid := "stable-pid-abc"
 	reg.Register("client-1", &ClientRecord{

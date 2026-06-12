@@ -14,6 +14,9 @@ const (
 	TypeRouteTunnelOpen  = "route_tunnel_open"
 	TypeRouteTunnelAck   = "route_tunnel_ack"
 	TypeRouteTunnelClose = "route_tunnel_close"
+	TypeRelayOpen        = "relay_open"
+	TypeRelayClose       = "relay_close"
+	TypeRelayEvent       = "relay_event"
 
 	AgentModeReverse = "reverse"
 	AgentModeBind    = "bind"
@@ -26,6 +29,12 @@ const (
 	RouteStateActive  = "active"
 	RouteStateClosed  = "closed"
 	RouteStateError   = "error"
+
+	RelayStateActive = "active"
+	RelayStateClosed = "closed"
+	RelayStateError  = "error"
+
+	DefaultRelayPort = 31748
 )
 
 type ListenerInfo struct {
@@ -130,4 +139,23 @@ type RouteTunnelClose struct {
 	Type     string `json:"type"`
 	RouteID  string `json:"route_id,omitempty"`
 	TunnelID string `json:"tunnel_id"`
+}
+
+type RelayOpen struct {
+	Type       string `json:"type"`
+	ListenAddr string `json:"listen_addr"`
+	TargetAddr string `json:"target_addr"`
+}
+
+type RelayClose struct {
+	Type string `json:"type"`
+}
+
+type RelayEvent struct {
+	Type       string `json:"type"`
+	ClientID   string `json:"client_id"`
+	State      string `json:"state"`
+	ListenAddr string `json:"listen_addr,omitempty"`
+	TargetAddr string `json:"target_addr,omitempty"`
+	Message    string `json:"message,omitempty"`
 }
